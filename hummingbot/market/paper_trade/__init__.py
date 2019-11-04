@@ -6,17 +6,17 @@ from hummingbot.market.coinbase_pro.coinbase_pro_order_book_tracker import Coinb
 from hummingbot.market.ddex.ddex_order_book_tracker import DDEXOrderBookTracker
 from hummingbot.market.huobi.huobi_market import HuobiMarket
 from hummingbot.market.huobi.huobi_order_book_tracker import HuobiOrderBookTracker
-from hummingbot.market.idex.idex_order_book_tracker import IDEXOrderBookTracker
 from hummingbot.market.paper_trade.market_config import MarketConfig
 from hummingbot.market.paper_trade.paper_trade_market import PaperTradeMarket
 from hummingbot.market.radar_relay.radar_relay_market import RadarRelayMarket
 from hummingbot.market.radar_relay.radar_relay_order_book_tracker import RadarRelayOrderBookTracker
+from hummingbot.market.switcheo.switcheo_order_book_tracker import SwitcheoOrderBookTracker
 
 from hummingbot.market.bamboo_relay.bamboo_relay_market import BambooRelayMarket
 from hummingbot.market.binance.binance_market import BinanceMarket
 from hummingbot.market.coinbase_pro.coinbase_pro_market import CoinbaseProMarket
 from hummingbot.market.ddex.ddex_market import DDEXMarket
-from hummingbot.market.idex.idex_market import IDEXMarket
+from hummingbot.market.switcheo.switcheo_market import SwitcheoMarket
 
 ORDER_BOOK_TRACKER_CLASS = {
     "binance": BinanceOrderBookTracker,
@@ -24,7 +24,8 @@ ORDER_BOOK_TRACKER_CLASS = {
     "coinbase_pro": CoinbaseProOrderBookTracker,
     "bamboo_relay": BambooRelayOrderBookTracker,
     "radar_relay": RadarRelayOrderBookTracker,
-    "huobi": HuobiOrderBookTracker
+    "huobi": HuobiOrderBookTracker,
+    "switcheo": SwitcheoOrderBookTracker,
 }
 
 
@@ -34,7 +35,8 @@ MARKET_CLASSES = {
     "coinbase_pro": CoinbaseProMarket,
     "bamboo_relay": BambooRelayMarket,
     "radar_relay": RadarRelayMarket,
-    "huobi": HuobiMarket
+    "huobi": HuobiMarket,
+    "switcheo": SwitcheoMarket,
 }
 
 

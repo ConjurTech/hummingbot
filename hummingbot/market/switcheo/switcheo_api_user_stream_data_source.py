@@ -15,7 +15,7 @@ from hummingbot.core.utils.async_utils import safe_ensure_future
 from switcheo.switcheo_client import SwitcheoClient
 from hummingbot.logger import HummingbotLogger
 
-SWITCHEO_API_ENDPOINT = "https://api.switcheo.com/api/v2/"
+SWITCHEO_API_ENDPOINT = "https://api.switcheo.network/v2/"
 SWITCHEO_USER_STREAM_ENDPOINT = "userDataStream"
 
 
@@ -123,4 +123,3 @@ class SwitcheoAPIUserStreamDataSource(UserStreamTrackerDataSource):
             except Exception:
                 self.logger().error("Unexpected error. Retrying after 5 seconds...", exc_info=True)
                 await asyncio.sleep(5.0)
-

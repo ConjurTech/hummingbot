@@ -6,6 +6,7 @@ from hummingbot.market.ddex.ddex_active_order_tracker import DDEXActiveOrderTrac
 from hummingbot.market.idex.idex_active_order_tracker import IDEXActiveOrderTracker
 from hummingbot.market.radar_relay.radar_relay_active_order_tracker import RadarRelayActiveOrderTracker
 from hummingbot.market.bamboo_relay.bamboo_relay_active_order_tracker import BambooRelayActiveOrderTracker
+from hummingbot.market.switcheo.switcheo_active_order_tracker import SwitcheoActiveOrderTracker
 
 
 class OrderBookTrackerEntry:
@@ -105,8 +106,23 @@ class CoinbaseProOrderBookTrackerEntry(OrderBookTrackerEntry):
     def __repr__(self) -> str:
         return f"CoinbaseProOrderBookTrackerEntry(symbol='{self._symbol}', timestamp='{self._timestamp}', " \
             f"order_book='{self._order_book}')"
-        
+
     @property
     def active_order_tracker(self) -> CoinbaseProActiveOrderTracker:
         return self._active_order_tracker
 
+
+class SwitcheoOrderBookTrackerEntry(OrderBookTrackerEntry):
+    def __init__(self, symbol: str, timestamp: float, order_book: OrderBook,
+                 active_order_tracker: SwitcheoActiveOrderTracker):
+
+        self._active_order_tracker = active_order_tracker
+        super(SwitcheoOrderBookTrackerEntry, self).__init__(symbol, timestamp, order_book)
+
+    def __repr__(self) -> str:
+        return f"SwitcheoOrderBookTrackerEntry(symbol='{self._symbol}', timestamp='{self._timestamp}', " \
+            f"order_book='{self._order_book}')"
+
+    @property
+    def active_order_tracker(self) -> SwitcheoActiveOrderTracker:
+        return self._active_order_tracker
