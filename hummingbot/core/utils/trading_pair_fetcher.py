@@ -15,6 +15,7 @@ BAMBOO_RELAY_ENDPOINT = "https://rest.bamboorelay.com/main/0x/markets"
 COINBASE_PRO_ENDPOINT = "https://api.pro.coinbase.com/products/"
 IDEX_REST_ENDPOINT = "https://api.idex.market/returnTicker"
 HUOBI_ENDPOINT = "https://api.huobi.pro/v1/common/symbols"
+SWITCHEO_ENDPOINT = "https://api.switcheo.network/v2/exchange/pairs?bases=[%22ETH%22,%22WBTC%22,%22DAI%22,%22USDT%22]"
 API_CALL_TIMEOUT = 5
 
 
@@ -149,6 +150,23 @@ class TradingPairFetcher:
                         # Do nothing if the request fails -- there will be no autocomplete for huobi trading pairs
                 return []
 
+    @staticmethod
+    async def fetch_switcheo_trading_pairs() -> List[str]:
+        async with aiohttp.ClientSession() as client:
+            async with client.get(SWITCHEO_ENDPOINT, timeout=API_CALL_TIMEOUT) as response:
+                if response.status == 200:
+                    try:
+                        data = await response.json()
+                        trading_pairs: list = []
+                        for trading_pair in data:
+                            if trading_pair not in ["SWTH_ETH", "NEO_ETH", "EOS_ETH", "NEO_DAI", "SDUSD_DAI", "NEO_WBTC"]:
+                                trading_pairs.append(trading_pair)
+                        return trading_pairs
+                    except Exception:
+                        pass
+                        # Do nothing if the request fails -- there will be no autocomplete for switcheo trading pairs
+                return []
+
     async def fetch_all(self):
         binance_trading_pairs = await self.fetch_binance_trading_pairs()
         ddex_trading_pairs = await self.fetch_ddex_trading_pairs()
@@ -157,6 +175,7 @@ class TradingPairFetcher:
         coinbase_pro_trading_pairs = await self.fetch_coinbase_pro_trading_pairs()
         huobi_trading_pairs = await self.fetch_huobi_trading_pairs()
         idex_trading_pairs = await self.fetch_idex_trading_pairs()
+        switcheo_trading_pairs = await self.fetch_switcheo_trading_pairs()
         self.trading_pairs = {
             "binance": binance_trading_pairs,
             "idex": idex_trading_pairs,
@@ -165,5 +184,6 @@ class TradingPairFetcher:
             "bamboo_relay": bamboo_relay_trading_pairs,
             "coinbase_pro": coinbase_pro_trading_pairs,
             "huobi": huobi_trading_pairs,
+            "switcheo": switcheo_trading_pairs,
         }
         self.ready = True
