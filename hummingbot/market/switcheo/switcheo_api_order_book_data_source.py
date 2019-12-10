@@ -13,8 +13,8 @@ from typing import (
 import re
 import time
 import ujson
-import websockets
-from websockets.exceptions import ConnectionClosed
+from socketio import Client as SocketIOClient
+from switcheo.streaming_client import OrderBooksNamespace
 
 from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.market.switcheo.switcheo_order_book import SwitcheoOrderBook
@@ -26,13 +26,13 @@ from hummingbot.core.data_type.order_book_tracker_entry import OrderBookTrackerE
 from hummingbot.core.data_type.order_book_message import OrderBookMessage, SwitcheoOrderBookMessage
 # from hummingbot.core.utils.exchange_rate_conversion import ExchangeRateConversion
 
-TRADING_PAIR_FILTER = re.compile(r"(ETH|DAI|USDT|WBTC|NEO|EOS)$")
+TRADING_PAIR_FILTER = re.compile(r"(ETH|DAI|USDT|WBTC)$")
 
 REST_BASE_URL = "https://api.switcheo.network/v2"
 TOKENS_URL = f"{REST_BASE_URL}/exchange/tokens"
 MARKETS_URL = f"{REST_BASE_URL}/exchange/pairs"
 TICKER_PRICE_CHANGE_URL = f"{REST_BASE_URL}/tickers/last_24_hours"
-WS_URL = "wss://ws.switcheo.io/"
+WS_URL = "https://ws.switcheo.io/"
 
 
 class SwitcheoAPIOrderBookDataSource(OrderBookTrackerDataSource):
@@ -79,7 +79,7 @@ class SwitcheoAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 raise IOError(f"Error fetching token info. HTTP status is {response.status}.")
             data = await response.json()
             # print(data)
-            return {d["address"]: d for d in data}
+            return {value["hash"]: value for key, value in data.items()}
 
     @classmethod
     @async_ttl_cache(ttl=60 * 30, maxsize=1)
@@ -124,8 +124,8 @@ class SwitcheoAPIOrderBookDataSource(OrderBookTrackerDataSource):
             print("WBTC DAI")
             print(wbtc_price)
             eth_price: float = float(all_markets.loc["ETH_DAI"].close)
-            neo_price: float = float(all_markets.loc["NEO_DAI"].close)
-            eos_price: float = float(all_markets.loc["EOS_CUSD"].close)
+            # neo_price: float = float(all_markets.loc["NEO_DAI"].close)
+            # eos_price: float = float(all_markets.loc["EOS_CUSD"].close)
             # usdt_price: float = float(all_markets.loc["USDT_DAI"].close)
             # eth_dai_price: float = float(all_markets.loc["ETH_DAI"]["volume"])
             # print(eth_dai_price)
@@ -145,8 +145,8 @@ class SwitcheoAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 (
                     volume * wbtc_price if symbol.endswith("WBTC") else
                     volume * eth_price if symbol.endswith("ETH") else
-                    volume * neo_price if symbol.endswith("NEO") else
-                    volume * eos_price if symbol.endswith("EOS") else
+                    # volume * neo_price if symbol.endswith("NEO") else
+                    # volume * eos_price if symbol.endswith("EOS") else
                     volume
                 )
                 for symbol, volume in zip(all_markets.index,
@@ -245,27 +245,25 @@ class SwitcheoAPIOrderBookDataSource(OrderBookTrackerDataSource):
             return retval
 
     async def _inner_messages(self,
-                              ws: websockets.WebSocketClientProtocol) -> AsyncIterable[str]:
+                              sio: SocketIOClient) -> AsyncIterable[str]:
         # Terminate the recv() loop as soon as the next message timed out, so the outer loop can reconnect.
         print("Inner Messages")
         try:
             while True:
                 try:
-                    msg: str = await asyncio.wait_for(ws.recv(), timeout=self.MESSAGE_TIMEOUT)
+                    msg: str = await asyncio.wait_for(sio.recv(), timeout=self.MESSAGE_TIMEOUT)
                     yield msg
                 except asyncio.TimeoutError:
                     try:
-                        pong_waiter = await ws.ping()
+                        pong_waiter = await sio.ping()
                         await asyncio.wait_for(pong_waiter, timeout=self.PING_TIMEOUT)
                     except asyncio.TimeoutError:
                         raise
         except asyncio.TimeoutError:
             self.logger().warning("WebSocket ping timed out. Going to reconnect...")
             return
-        except ConnectionClosed:
-            return
         finally:
-            await ws.close()
+            await sio.close()
 
     async def listen_for_trades(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
         # Trade messages are received from the order book web socket
@@ -277,26 +275,42 @@ class SwitcheoAPIOrderBookDataSource(OrderBookTrackerDataSource):
         while True:
             try:
                 trading_pairs: List[str] = await self.get_trading_pairs()
-                async with websockets.connect(WS_URL) as ws:
-                    ws: websockets.WebSocketClientProtocol = ws
-                    for trading_pair in trading_pairs:
-                        request: Dict[str, str] = {
-                            "type": "SUBSCRIBE",
-                            "topic": "BOOK",
-                            "market": trading_pair
-                        }
-                        await ws.send(ujson.dumps(request))
-                    async for raw_msg in self._inner_messages(ws):
-                        msg = ujson.loads(raw_msg)
-                        # Valid Diff messages from Switcheo have action key
-                        if "action" in msg:
-                            diff_msg: SwitcheoOrderBookMessage = SwitcheoOrderBook.diff_message_from_exchange(
-                                msg, time.time())
-                            output.put_nowait(diff_msg)
+                print("Order book diffs trading pairs: ")
+                print(trading_pairs)
+                sio = SocketIOClient()
+                sio.register_namespace(OrderBooksNamespace())
+                sio.connect(WS_URL)
+                for trading_pair in trading_pairs:
+                    request: Dict[str, str] = {
+                        "contractHash": "0x7ee7ca6e75de79e618e88bdf80d0b1db136b22d0",
+                        "pair": trading_pair
+                    }
+                    sio.emit(event="join", data=ujson.dumps(request), namespace='/v2/books')
+                async for raw_msg in self._inner_messages(sio):
+                    msg = ujson.loads(raw_msg)
+                    # Valid Diff messages from Switcheo have action key
+                    if "action" in msg:
+                        diff_msg: SwitcheoOrderBookMessage = SwitcheoOrderBook.diff_message_from_exchange(
+                            msg, time.time())
+                        output.put_nowait(diff_msg)
+                # async with sio.connect(WS_URL) as sio:
+                #     for trading_pair in trading_pairs:
+                #         request: Dict[str, str] = {
+                #             "contractHash": "0x7ee7ca6e75de79e618e88bdf80d0b1db136b22d0",
+                #             "pair": trading_pair
+                #         }
+                #         await sio.emit(event="join", data=ujson.dumps(request), namespace='/v2/books')
+                #     async for raw_msg in self._inner_messages(sio):
+                #         msg = ujson.loads(raw_msg)
+                #         # Valid Diff messages from Switcheo have action key
+                #         if "action" in msg:
+                #             diff_msg: SwitcheoOrderBookMessage = SwitcheoOrderBook.diff_message_from_exchange(
+                #                 msg, time.time())
+                #             output.put_nowait(diff_msg)
             except asyncio.CancelledError:
                 raise
             except Exception:
-                self.logger().error("Unexpected error with WebSocket connection. Retrying after 30 seconds...",
+                self.logger().error("Unexpected error with SocketIO connection. Retrying after 30 seconds...",
                                     exc_info=True)
                 await asyncio.sleep(30.0)
 

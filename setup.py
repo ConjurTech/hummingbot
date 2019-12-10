@@ -104,7 +104,9 @@ def main():
         "pytz",
         "pyyaml",
         "python-binance==0.6.9",
+        "python-socketio[client]",
         "sqlalchemy",
+        "switcheo==0.4.0",
         "ujson",
         "yarl",
     ]

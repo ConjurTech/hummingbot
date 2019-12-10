@@ -71,7 +71,7 @@ MARKET_CLASSES = {
     "huobi": HuobiMarket,
     "idex": IDEXMarket,
     "radar_relay": RadarRelayMarket,
-    "switcho": SwitcheoMarket,
+    "switcheo": SwitcheoMarket,
 }
 
 

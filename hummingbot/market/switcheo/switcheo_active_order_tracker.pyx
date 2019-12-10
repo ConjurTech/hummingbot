@@ -199,19 +199,21 @@ cdef class SwitcheoActiveOrderTracker:
         for snapshot_orders, active_orders in [(message.content["bids"], self._active_bids),
                                                (message.content["asks"], self._active_asks)]:
             for order in snapshot_orders:
+                print("Snapshot Orders")
+                print(order)
                 price = Decimal(order["price"])
-                amount = Decimal(order["amount"])
+                amount = Decimal(order["quantity"])
                 order_dict = {
                     "remainingBaseTokenAmount": order["remainingBaseTokenAmount"]
                 }
 
-                if price in active_orders:
-                    active_orders[price][order_hash] = order_dict
-                else:
-                    active_orders[price] = {
-                        order_hash: order_dict
-                    }
-                self._order_price_map[order_hash] = price
+                # if price in active_orders:
+                #     active_orders[price][order_hash] = order_dict
+                # else:
+                #     active_orders[price] = {
+                #         order_hash: order_dict
+                #     }
+                # self._order_price_map[order_hash] = price
 
         # Return the sorted snapshot tables.
         cdef:
