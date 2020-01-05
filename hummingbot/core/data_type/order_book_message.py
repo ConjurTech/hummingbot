@@ -94,6 +94,7 @@ class DDEXOrderBookMessage(OrderBookMessage):
             timestamp = content["time"] * 1e-3
         return super(DDEXOrderBookMessage, cls).__new__(cls, message_type, content,
                                                         timestamp=timestamp, *args, **kwargs)
+
     @property
     def update_id(self) -> int:
         return int(self.timestamp * 1e3)
@@ -111,7 +112,7 @@ class DDEXOrderBookMessage(OrderBookMessage):
         raise NotImplementedError("DDEX order book messages have different semantics.")
 
     @property
-    def bids(self)-> List[OrderBookRow]:
+    def bids(self) -> List[OrderBookRow]:
         raise NotImplementedError("DDEX order book messages have different semantics.")
 
     @property
@@ -148,6 +149,7 @@ class IDEXOrderBookMessage(OrderBookMessage):
                 timestamp = pd.Timestamp(datetime_str, tz="UTC").timestamp()
         return super(IDEXOrderBookMessage, cls).__new__(cls, message_type, content,
                                                         timestamp=timestamp, *args, **kwargs)
+
     @property
     def update_id(self) -> int:
         return int(self.timestamp * 1e3)
@@ -165,7 +167,7 @@ class IDEXOrderBookMessage(OrderBookMessage):
         raise NotImplementedError("IDEX order book messages have different semantics.")
 
     @property
-    def bids(self)-> List[OrderBookRow]:
+    def bids(self) -> List[OrderBookRow]:
         raise NotImplementedError("IDEX order book messages have different semantics.")
 
     @property
@@ -229,7 +231,7 @@ class RadarRelayOrderBookMessage(OrderBookMessage):
         raise NotImplementedError("RadarRelay order book messages have different semantics.")
 
     @property
-    def bids(self)-> List[OrderBookRow]:
+    def bids(self) -> List[OrderBookRow]:
         raise NotImplementedError("RadarRelay order book messages have different semantics.")
 
     @property
@@ -288,7 +290,7 @@ class BambooRelayOrderBookMessage(OrderBookMessage):
         raise NotImplementedError("BambooRelay order book messages have different semantics.")
 
     @property
-    def bids(self)-> List[OrderBookRow]:
+    def bids(self) -> List[OrderBookRow]:
         raise NotImplementedError("BambooRelay order book messages have different semantics.")
 
     @property
@@ -320,7 +322,7 @@ class CoinbaseProOrderBookMessage(OrderBookMessage):
                 raise ValueError("timestamp must not be None when initializing snapshot messages.")
             timestamp = pd.Timestamp(content["time"], tz="UTC").timestamp()
         return super(CoinbaseProOrderBookMessage, cls).__new__(cls, message_type, content,
-                                                        timestamp=timestamp, *args, **kwargs)
+                                                               timestamp=timestamp, *args, **kwargs)
 
     @property
     def update_id(self) -> int:
@@ -347,19 +349,17 @@ class CoinbaseProOrderBookMessage(OrderBookMessage):
         raise NotImplementedError("Coinbase Pro order book messages have different semantics.")
 
     @property
-    def bids(self)-> List[OrderBookRow]:
+    def bids(self) -> List[OrderBookRow]:
         raise NotImplementedError("Coinbase Pro order book messages have different semantics.")
+
 
 class SwitcheoOrderBookMessage(OrderBookMessage):
     def __new__(cls, message_type: OrderBookMessageType, content: Dict[str, any], timestamp: Optional[float] = None,
                 *args, **kwargs):
         if message_type is OrderBookMessageType.SNAPSHOT and timestamp is None:
             raise ValueError("timestamp must not be None when initializing snapshot messages.")
-
-        elif message_type is OrderBookMessageType.DIFF and content["action"] in ["NEW"]:
-            timestamp = pd.Timestamp(content["event"]["order"]["createdDate"], tz="UTC").timestamp()
-        elif message_type is OrderBookMessageType.DIFF and content["action"] in ["FILL"]:
-            timestamp = content["event"]["timestamp"]
+        elif message_type is OrderBookMessageType.DIFF and timestamp is None:
+            raise ValueError("timestamp must not be None when defining diff messages.")
         elif message_type is OrderBookMessageType.TRADE:
             timestamp = content["event"]["timestamp"]
         elif timestamp is None:
@@ -385,7 +385,7 @@ class SwitcheoOrderBookMessage(OrderBookMessage):
         raise NotImplementedError("Switcheo order book messages have different semantics.")
 
     @property
-    def bids(self)-> List[OrderBookRow]:
+    def bids(self) -> List[OrderBookRow]:
         raise NotImplementedError("Switcheo order book messages have different semantics.")
 
     @property

@@ -18,12 +18,10 @@ SwitcheoOrderBookTrackingDictionary = Dict[Decimal, Dict[str, Dict[str, any]]]
 cdef class SwitcheoActiveOrderTracker:
     def __init__(self,
                  active_asks: SwitcheoOrderBookTrackingDictionary = None,
-                 active_bids: SwitcheoOrderBookTrackingDictionary = None,
-                 order_price_map: Dict[str, Decimal] = None):
+                 active_bids: SwitcheoOrderBookTrackingDictionary = None):
         super().__init__()
         self._active_asks = active_asks or {}
         self._active_bids = active_bids or {}
-        self._order_price_map = order_price_map or {}
 
     @classmethod
     def logger(cls) -> HummingbotLogger:
@@ -40,195 +38,44 @@ cdef class SwitcheoActiveOrderTracker:
     def active_bids(self) -> SwitcheoOrderBookTrackingDictionary:
         return self._active_bids
 
-    @property
-    def order_price_map(self) -> Dict[str, Decimal]:
-        return self._order_price_map
-
     def volume_for_ask_price(self, price) -> float:
-        return sum([float(msg["remainingBaseTokenAmount"]) for msg in self._active_asks[price].values()])
+        return sum([float(msg["amount"]) for msg in self._active_asks[price].values()])
 
     def volume_for_bid_price(self, price) -> float:
-        return sum([float(msg["remainingBaseTokenAmount"]) for msg in self._active_bids[price].values()])
+        return sum([float(msg["amount"]) for msg in self._active_bids[price].values()])
 
     cdef tuple c_convert_diff_message_to_np_arrays(self, object message):
-        # "CANCEL" and "REMOVE" messages contain only orderHash and not price which is why "_order_price_map" is
-        # required.
-        cdef:
-            str action = message.content["action"]
-            dict event = message.content["event"]
-            str order_side
-            str order_hash
-            object price
-            double timestamp = message.timestamp
-            double quantity = 0
-
-        if action == "NEW":
-            order_side = event["order"]["type"]
-            order_hash = event["order"]["orderHash"]
-            price = Decimal(event["order"]["price"])
-            self._order_price_map[order_hash] = price
-            order_dict = {
-                "orderHash": order_hash,
-                "remainingBaseTokenAmount": event["order"]["remainingBaseTokenAmount"]
-            }
-            if order_side == "BID":
-                if price in self._active_bids:
-                    self._active_bids[price][order_hash] = order_dict
-                else:
-                    self._active_bids[price] = {order_hash: order_dict}
-
-                quantity = self.volume_for_bid_price(price)
-                return np.array([[timestamp, float(price), quantity, message.update_id]], dtype="float64"), s_empty_diff
-
-            elif order_side == "ASK":
-                if price in self._active_asks:
-                    self._active_asks[price][order_hash] = order_dict
-                else:
-                    self._active_asks[price] = {order_hash: order_dict}
-
-                quantity = self.volume_for_ask_price(price)
-                return s_empty_diff, np.array([[timestamp, float(price), quantity, message.update_id]], dtype="float64")
-            else:
-                raise ValueError(f"Unknown order side '{order_side}'. Aborting.")
-
-        elif action in ["REMOVE", "CANCEL"]:
-            order_side = event["orderType"]
-            order_hash = event["orderHash"]
-            if order_hash in self._order_price_map:
-                price = self._order_price_map[order_hash]
-            else:
-                self.logger().debug(f"OrderHash {order_hash} {message.timestamp} order not found in order price map")
-                return s_empty_diff, s_empty_diff
-
-            del self._order_price_map[order_hash]
-
-            if order_side == "BID":
-                if price in self._active_bids:
-                    if order_hash in self._active_bids[price]:
-                        del self._active_bids[price][order_hash]
-
-                    if len(self._active_bids[price]) < 1:
-                        del self._active_bids[price]
-
-                        return (np.array([[timestamp, float(price), 0.0, message.update_id]], dtype="float64"),
-                                s_empty_diff)
-                    else:
-                        quantity = self.volume_for_bid_price(price)
-                        return (np.array([[timestamp, float(price), quantity, message.update_id]], dtype="float64"),
-                                s_empty_diff)
-                else:
-                    return s_empty_diff, s_empty_diff
-            elif order_side == "ASK":
-                if price in self._active_asks:
-                    if order_hash in self._active_asks[price]:
-                        del self._active_asks[price][order_hash]
-
-                    if len(self._active_asks[price]) < 1:
-                        del self._active_asks[price]
-                        return (s_empty_diff,
-                                np.array([[timestamp, float(price), 0.0, message.update_id]], dtype="float64"))
-                    else:
-                        quantity = self.volume_for_ask_price(price)
-                        return (s_empty_diff,
-                                np.array([[timestamp, float(price), quantity, message.update_id]], dtype="float64"))
-                else:
-                    return s_empty_diff, s_empty_diff
-            else:
-                raise ValueError(f"Unknown order side '{order_side}'. Aborting.")
-
-        elif action == "FILL":
-            remaining_base_amount = Decimal(event["order"]["remainingBaseTokenAmount"])
-            order_hash = event["order"]["orderHash"]
-            price = Decimal(event["order"]["price"])
-            order_side = event["type"]
-            if order_side == "BUY":
-                if price in self._active_bids:
-                    if order_hash in self._active_bids[price]:
-                        if event["order"]["state"] == "FILLED":
-                            del self._order_price_map[order_hash]
-                            del self._active_bids[price][order_hash]
-                        else:  # update the remaining amount of the order
-                            self._active_bids[price][order_hash]["remainingBaseTokenAmount"] = remaining_base_amount
-
-                        if len(self._active_bids[price]) < 1:
-                            del self._active_bids[price]
-                            return (np.array([[timestamp, float(price), 0.0, message.update_id]], dtype="float64"),
-                                    s_empty_diff)
-                        else:
-                            quantity = self.volume_for_bid_price(price)
-                            return (np.array([[timestamp, float(price), quantity, message.update_id]], dtype="float64"),
-                                    s_empty_diff)
-
-                # return empty diff if order or price is not found
-                return s_empty_diff, s_empty_diff
-            elif order_side == "SELL":
-                if price in self._active_asks:
-                    if order_hash in self._active_asks[price]:
-                        if event["order"]["state"] == "FILLED":
-                            del self._order_price_map[order_hash]
-                            del self._active_asks[price][order_hash]
-                        else:  # update the remaining amount of the order
-                            self._active_asks[price][order_hash]["remainingBaseTokenAmount"] = remaining_base_amount
-
-                        if len(self._active_asks[price]) < 1:
-                            del self._active_asks[price]
-                            return (s_empty_diff,
-                                    np.array([[timestamp, float(price), 0.0, message.update_id]], dtype="float64"))
-                        else:
-                            quantity = self.volume_for_ask_price(price)
-                            return (s_empty_diff,
-                                    np.array([[timestamp, float(price), quantity, message.update_id]],
-                                             dtype="float64"))
-
-                # return empty diff if order or price is not found
-                return s_empty_diff, s_empty_diff
-
-        else:
-            raise ValueError(f"Unknown action type '{action}'. Must be 'NEW', 'REMOVE', 'CANCEL' or 'FILL'.")
+        pass
 
     cdef tuple c_convert_snapshot_message_to_np_arrays(self, object message):
         cdef:
             object price
-            str order_hash
             str amount
 
         # Refresh all order tracking.
         self._active_bids.clear()
         self._active_asks.clear()
-        self._order_price_map.clear()
-        for snapshot_orders, active_orders in [(message.content["bids"], self._active_bids),
-                                               (message.content["asks"], self._active_asks)]:
+        for snapshot_orders, active_orders in [(message.content["buys"], self._active_bids),
+                                               (message.content["sells"], self._active_asks)]:
             for order in snapshot_orders:
-                print("Snapshot Orders")
-                print(order)
                 price = Decimal(order["price"])
-                amount = Decimal(order["quantity"])
-                order_dict = {
-                    "remainingBaseTokenAmount": order["remainingBaseTokenAmount"]
-                }
-
-                # if price in active_orders:
-                #     active_orders[price][order_hash] = order_dict
-                # else:
-                #     active_orders[price] = {
-                #         order_hash: order_dict
-                #     }
-                # self._order_price_map[order_hash] = price
+                amount = order["amount"]
+                active_orders[price] = amount
 
         # Return the sorted snapshot tables.
         cdef:
             np.ndarray[np.float64_t, ndim=2] bids = np.array(
                 [[message.timestamp,
                   float(price),
-                  sum([float(order_dict["remainingBaseTokenAmount"])
-                       for order_dict in self._active_bids[price].values()]),
+                  sum([float(amount)
+                       for amount in self._active_bids[price]]),
                   message.update_id]
                  for price in sorted(self._active_bids.keys(), reverse=True)], dtype="float64", ndmin=2)
             np.ndarray[np.float64_t, ndim=2] asks = np.array(
                 [[message.timestamp,
                   float(price),
-                  sum([float(order_dict["remainingBaseTokenAmount"])
-                       for order_dict in self._active_asks[price].values()]),
+                  sum([float(amount)
+                       for amount in self._active_asks[price]]),
                   message.update_id]
                  for price in sorted(self._active_asks.keys(), reverse=True)], dtype="float64", ndmin=2)
 
@@ -252,10 +99,7 @@ cdef class SwitcheoActiveOrderTracker:
                         dtype="float64")
 
     def convert_diff_message_to_order_book_row(self, message):
-        np_bids, np_asks = self.c_convert_diff_message_to_np_arrays(message)
-        bids_row = [OrderBookRow(price, qty, update_id) for ts, price, qty, update_id in np_bids]
-        asks_row = [OrderBookRow(price, qty, update_id) for ts, price, qty, update_id in np_asks]
-        return bids_row, asks_row
+        pass
 
     def convert_snapshot_message_to_order_book_row(self, message):
         np_bids, np_asks = self.c_convert_snapshot_message_to_np_arrays(message)

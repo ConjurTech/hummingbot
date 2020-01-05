@@ -5,26 +5,23 @@ import aiohttp
 import logging
 import pandas as pd
 from typing import (
-    AsyncIterable,
     Dict,
     List,
     Optional,
 )
 import re
 import time
-import ujson
 from socketio import Client as SocketIOClient
-from switcheo.streaming_client import OrderBooksNamespace
 
 from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.market.switcheo.switcheo_order_book import SwitcheoOrderBook
 from hummingbot.market.switcheo.switcheo_active_order_tracker import SwitcheoActiveOrderTracker
+from hummingbot.market.switcheo.switcheo_socketio_namespace import OrderBooksNamespace
 from hummingbot.core.utils import async_ttl_cache
 from hummingbot.logger import HummingbotLogger
 from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
 from hummingbot.core.data_type.order_book_tracker_entry import OrderBookTrackerEntry, SwitcheoOrderBookTrackerEntry
-from hummingbot.core.data_type.order_book_message import OrderBookMessage, SwitcheoOrderBookMessage
-# from hummingbot.core.utils.exchange_rate_conversion import ExchangeRateConversion
+from hummingbot.core.data_type.order_book_message import SwitcheoOrderBookMessage
 
 TRADING_PAIR_FILTER = re.compile(r"(ETH|DAI|USDT|WBTC)$")
 
@@ -32,7 +29,7 @@ REST_BASE_URL = "https://api.switcheo.network/v2"
 TOKENS_URL = f"{REST_BASE_URL}/exchange/tokens"
 MARKETS_URL = f"{REST_BASE_URL}/exchange/pairs"
 TICKER_PRICE_CHANGE_URL = f"{REST_BASE_URL}/tickers/last_24_hours"
-WS_URL = "https://ws.switcheo.io/"
+WS_URL = "https://ws.switcheo.io"
 
 
 class SwitcheoAPIOrderBookDataSource(OrderBookTrackerDataSource):
@@ -49,15 +46,15 @@ class SwitcheoAPIOrderBookDataSource(OrderBookTrackerDataSource):
             cls._rraobds_logger = logging.getLogger(__name__)
         return cls._rraobds_logger
 
-    def __init__(self, symbols: Optional[List[str]] = None):
-        print("Switcheo API Order Book Data Source")
+    def __init__(self,
+                 socketio_client: SocketIOClient,
+                 symbols: Optional[List[str]] = None):
         super().__init__()
         self._symbols: Optional[List[str]] = symbols
-        print(self._symbols)
+        self._sio: SocketIOClient = socketio_client
 
     @classmethod
     def http_client(cls) -> aiohttp.ClientSession:
-        print("http client")
         if cls._client is None:
             if not asyncio.get_event_loop().is_running():
                 raise EnvironmentError("Event loop must be running to start HTTP client session.")
@@ -69,16 +66,12 @@ class SwitcheoAPIOrderBookDataSource(OrderBookTrackerDataSource):
         """
         Returns all token information
         """
-        print("Switcheo get all token info")
-        print(TOKENS_URL)
         client: aiohttp.ClientSession = cls.http_client()
         async with client.get(TOKENS_URL) as response:
             response: aiohttp.ClientResponse = response
-            # print(response)
             if response.status != 200:
                 raise IOError(f"Error fetching token info. HTTP status is {response.status}.")
             data = await response.json()
-            # print(data)
             return {value["hash"]: value for key, value in data.items()}
 
     @classmethod
@@ -87,42 +80,28 @@ class SwitcheoAPIOrderBookDataSource(OrderBookTrackerDataSource):
         """
         Returned data frame should have symbol as index and include usd volume, baseAsset and quoteAsset
         """
-        print("get active exchange markets")
         client: aiohttp.ClientSession = cls.http_client()
         async with client.get(f"{MARKETS_URL}?show_details=1") as response:
             response: aiohttp.ClientResponse = response
-            # print(response)
             if response.status != 200:
                 raise IOError(f"Error fetching active Switcheo markets. HTTP status is {response.status}.")
             data = await response.json()
-            print("Active Exchange Markets JSON")
-            # print(data)
             data: List[Dict[str, any]] = [
                 {**item, **{"baseAsset": item["baseAssetSymbol"], "quoteAsset": item["quoteAssetSymbol"]}}
                 for item in data
             ]
-            print("Active Echange Markets after Response with JSON manipulation")
-            # print(data)
             # active_markets: pd.DataFrame = pd.DataFrame.from_records(data=data, index="name")
-            print("Active Markets")
-            # print(active_markets)
 
         async with client.get(f"{TICKER_PRICE_CHANGE_URL}") as response:
-            print("Ticker Price Change URL")
             response: aiohttp.ClientResponse = response
 
             if response.status != 200:
                 raise IOError(f"Error fetching active Switcheo markets. HTTP status is {response.status}.")
             data = await response.json()
-            # print(data)
 
             all_markets: pd.DataFrame = pd.DataFrame.from_records(data=data, index="pair")
-            print("All Markets")
-            # print(all_markets)
 
             wbtc_price: float = float(all_markets.loc["WBTC_DAI"].close)
-            print("WBTC DAI")
-            print(wbtc_price)
             eth_price: float = float(all_markets.loc["ETH_DAI"].close)
             # neo_price: float = float(all_markets.loc["NEO_DAI"].close)
             # eos_price: float = float(all_markets.loc["EOS_CUSD"].close)
@@ -154,197 +133,89 @@ class SwitcheoAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
             all_markets.loc[:, "USDVolume"] = usd_volume
             all_markets.loc[:, "volume"] = all_markets.volume
-            # print(all_markets)
             return all_markets.sort_values("USDVolume", ascending=False)
 
     @staticmethod
     async def get_snapshot(client: aiohttp.ClientSession, trading_pair: str) -> Dict[str, any]:
-        print(f"Get Snapshot: {trading_pair}")
         async with client.get(f"{REST_BASE_URL}/offers/book?pair={trading_pair}") as response:
             response: aiohttp.ClientResponse = response
             if response.status != 200:
-                print("Incorrect Order Book Snapshot URL!")
                 raise IOError(f"Error fetching Switcheo market snapshot for {trading_pair}. "
                               f"HTTP status is {response.status}.")
             return await response.json()
 
     async def get_trading_pairs(self) -> List[str]:
-        print("Get Trading Pairs")
-        print(self._symbols)
-        # self._symbols = []
+        self.logger().debug(f"Get Trading Pairs: {self._symbols}")
         if not self._symbols:
             try:
-                print("Inside Try")
                 active_markets: pd.DataFrame = await self.get_active_exchange_markets()
-                print("Active Markets")
-                print(active_markets)
+                self.logger().debug(f"Active Markets: {active_markets}")
                 self._symbols = active_markets.index.tolist()
             except Exception:
                 self._symbols = []
-                print("Error")
                 self.logger().network(
                     f"Error getting active exchange information.",
                     exc_info=True,
                     app_warning_msg=f"Error getting active exchange information. Check network connection."
                 )
-        # print(self._symbols)
         return self._symbols
 
-    async def get_tracking_pairs(self) -> Dict[str, OrderBookTrackerEntry]:
-        # Get the currently active markets
-        print("Get Tracking Pairs")
-        async with aiohttp.ClientSession() as client:
-            trading_pairs: List[str] = await self.get_trading_pairs()
-            print(trading_pairs)
-            retval: Dict[str, OrderBookTrackerEntry] = {}
+    async def get_tracking_pairs(self, snapshot_msg_stream, diff_msg_stream) -> Dict[str, OrderBookTrackerEntry]:
+        # Get the currently active markets and start the SocketIO connection
+        trading_pairs: List[str] = await self.get_trading_pairs()
+        self.logger().debug(f"Trading Pairs: {trading_pairs}")
+        retval: Dict[str, OrderBookTrackerEntry] = {}
 
-            number_of_pairs: int = len(trading_pairs)
-            for index, trading_pair in enumerate(trading_pairs):
-                try:
-                    print("Inside get Tracking Pairs to Get Snapshot")
-                    snapshot: Dict[str, any] = await self.get_snapshot(client, trading_pair)
-                    print(snapshot)
-                    snapshot_timestamp: float = time.time()
-                    snapshot_msg: SwitcheoOrderBookMessage = SwitcheoOrderBook.snapshot_message_from_exchange(
-                        snapshot,
-                        snapshot_timestamp,
-                        metadata={"symbol": trading_pair}
-                    )
-                    print("Snapshot Message")
-                    print(snapshot_msg)
-
-                    switcheo_order_book: OrderBook = self.order_book_create_function()
-                    print("Switcheo Order Book")
-                    print(switcheo_order_book)
-                    switcheo_active_order_tracker: SwitcheoActiveOrderTracker = SwitcheoActiveOrderTracker()
-                    print("Switcheo Active Order Tracker")
-                    print(switcheo_active_order_tracker)
-                    bids, asks = switcheo_active_order_tracker.convert_snapshot_message_to_order_book_row(snapshot_msg)
-                    print("Bids")
-                    print(bids)
-                    print("Asks")
-                    print(asks)
-                    switcheo_order_book.apply_snapshot(bids, asks, snapshot_msg.update_id)
-                    print("Switcheo Order Book Apply Snapshot")
-                    print(switcheo_order_book)
-
-                    retval[trading_pair] = SwitcheoOrderBookTrackerEntry(
-                        trading_pair,
-                        snapshot_timestamp,
-                        switcheo_order_book,
-                        switcheo_active_order_tracker
-                    )
-                    self.logger().info(f"Initialized order book for {trading_pair}. "
-                                       f"{index+1}/{number_of_pairs} completed.")
-
-                    await asyncio.sleep(0.9)
-
-                except Exception:
-                    self.logger().error(f"Error getting snapshot for {trading_pair}. ", exc_info=True)
-                    await asyncio.sleep(5.0)
-            return retval
-
-    async def _inner_messages(self,
-                              sio: SocketIOClient) -> AsyncIterable[str]:
-        # Terminate the recv() loop as soon as the next message timed out, so the outer loop can reconnect.
-        print("Inner Messages")
-        try:
-            while True:
-                try:
-                    msg: str = await asyncio.wait_for(sio.recv(), timeout=self.MESSAGE_TIMEOUT)
-                    yield msg
-                except asyncio.TimeoutError:
-                    try:
-                        pong_waiter = await sio.ping()
-                        await asyncio.wait_for(pong_waiter, timeout=self.PING_TIMEOUT)
-                    except asyncio.TimeoutError:
-                        raise
-        except asyncio.TimeoutError:
-            self.logger().warning("WebSocket ping timed out. Going to reconnect...")
-            return
-        finally:
-            await sio.close()
-
-    async def listen_for_trades(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
-        # Trade messages are received from the order book web socket
-        print("Listen for Trades")
-        pass
-
-    async def listen_for_order_book_diffs(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
-        print("Listen for order book diffs")
-        while True:
+        number_of_pairs: int = len(trading_pairs)
+        for index, trading_pair in enumerate(trading_pairs):
             try:
-                trading_pairs: List[str] = await self.get_trading_pairs()
-                print("Order book diffs trading pairs: ")
-                print(trading_pairs)
-                sio = SocketIOClient()
-                sio.register_namespace(OrderBooksNamespace())
-                sio.connect(WS_URL)
+                obn = OrderBooksNamespace(order_book_snapshot_stream=snapshot_msg_stream, order_book_diff_stream=diff_msg_stream)
+                self._sio.register_namespace(obn)
+                self._sio.connect(url=WS_URL)
                 for trading_pair in trading_pairs:
                     request: Dict[str, str] = {
                         "contractHash": "0x7ee7ca6e75de79e618e88bdf80d0b1db136b22d0",
                         "pair": trading_pair
                     }
-                    sio.emit(event="join", data=ujson.dumps(request), namespace='/v2/books')
-                async for raw_msg in self._inner_messages(sio):
-                    msg = ujson.loads(raw_msg)
-                    # Valid Diff messages from Switcheo have action key
-                    if "action" in msg:
-                        diff_msg: SwitcheoOrderBookMessage = SwitcheoOrderBook.diff_message_from_exchange(
-                            msg, time.time())
-                        output.put_nowait(diff_msg)
-                # async with sio.connect(WS_URL) as sio:
-                #     for trading_pair in trading_pairs:
-                #         request: Dict[str, str] = {
-                #             "contractHash": "0x7ee7ca6e75de79e618e88bdf80d0b1db136b22d0",
-                #             "pair": trading_pair
-                #         }
-                #         await sio.emit(event="join", data=ujson.dumps(request), namespace='/v2/books')
-                #     async for raw_msg in self._inner_messages(sio):
-                #         msg = ujson.loads(raw_msg)
-                #         # Valid Diff messages from Switcheo have action key
-                #         if "action" in msg:
-                #             diff_msg: SwitcheoOrderBookMessage = SwitcheoOrderBook.diff_message_from_exchange(
-                #                 msg, time.time())
-                #             output.put_nowait(diff_msg)
-            except asyncio.CancelledError:
-                raise
+                self._sio.emit(event="join", data=request, namespace='/v2/books')
+                self._sio.sleep(2)
+                snapshot: Dict[str, any] = self._sio.namespace_handlers['/v2/books'].order_book[trading_pair]['book']
+                snapshot_timestamp: float = time.time()
+                snapshot_msg: SwitcheoOrderBookMessage = SwitcheoOrderBook.snapshot_message_from_exchange(
+                    snapshot,
+                    snapshot_timestamp,
+                    metadata={"symbol": trading_pair}
+                )
+
+                switcheo_order_book: OrderBook = self.order_book_create_function()
+                switcheo_active_order_tracker: SwitcheoActiveOrderTracker = SwitcheoActiveOrderTracker()
+                bids, asks = switcheo_active_order_tracker.convert_snapshot_message_to_order_book_row(snapshot_msg)
+                switcheo_order_book.apply_snapshot(bids, asks, snapshot_msg.update_id)
+
+                retval[trading_pair] = SwitcheoOrderBookTrackerEntry(
+                    trading_pair,
+                    snapshot_timestamp,
+                    switcheo_order_book,
+                    switcheo_active_order_tracker
+                )
+                self.logger().info(f"Initialized order book for {trading_pair}. "
+                                   f"{index+1}/{number_of_pairs} completed.")
+
+                await asyncio.sleep(0.9)
+
             except Exception:
-                self.logger().error("Unexpected error with SocketIO connection. Retrying after 30 seconds...",
-                                    exc_info=True)
-                await asyncio.sleep(30.0)
+                self.logger().error(f"Error getting snapshot for {trading_pair}. ", exc_info=True)
+                await asyncio.sleep(5.0)
+        return retval
+
+    async def listen_for_trades(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
+        # Trade messages are received from the order book SocketIO web socket
+        pass
+
+    async def listen_for_order_book_diffs(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
+        # Order Book messages are received from the order book SocketIO web socket
+        pass
 
     async def listen_for_order_book_snapshots(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
-        print("Listen for order book snapshots")
-        while True:
-            try:
-                trading_pairs: List[str] = await self.get_trading_pairs()
-                client: aiohttp.ClientSession = self.http_client()
-                for trading_pair in trading_pairs:
-                    try:
-                        snapshot: Dict[str, any] = await self.get_snapshot(client, trading_pair)
-                        snapshot_timestamp: float = time.time()
-                        snapshot_msg: OrderBookMessage = SwitcheoOrderBook.snapshot_message_from_exchange(
-                            snapshot,
-                            snapshot_timestamp,
-                            metadata={"symbol": trading_pair}
-                        )
-                        output.put_nowait(snapshot_msg)
-                        self.logger().debug(f"Saved order book snapshot for {trading_pair}")
-
-                        await asyncio.sleep(5.0)
-
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception:
-                        self.logger().error("Unexpected error.", exc_info=True)
-                        await asyncio.sleep(5.0)
-                this_hour: pd.Timestamp = pd.Timestamp.utcnow().replace(minute=0, second=0, microsecond=0)
-                next_hour: pd.Timestamp = this_hour + pd.Timedelta(hours=1)
-                delta: float = next_hour.timestamp() - time.time()
-                await asyncio.sleep(delta)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                self.logger().error("Unexpected error.", exc_info=True)
-                await asyncio.sleep(5.0)
+        # Order Book messages are received from the order book SocketIO web socket
+        pass

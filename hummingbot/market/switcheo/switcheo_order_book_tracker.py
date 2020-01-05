@@ -12,6 +12,7 @@ from typing import (
     Optional,
     Set
 )
+from socketio import Client as SocketIOClient
 
 from hummingbot.core.event.events import TradeType
 from hummingbot.logger import HummingbotLogger
@@ -41,54 +42,38 @@ class SwitcheoOrderBookTracker(OrderBookTracker):
     def __init__(self,
                  data_source_type: OrderBookTrackerDataSourceType = OrderBookTrackerDataSourceType.EXCHANGE_API,
                  symbols: Optional[List[str]] = None):
-        print("Switcheo Order Book Tracker")
+        self.logger().debug("Switcheo Order Book Tracker")
         super().__init__(data_source_type=data_source_type)
 
         self._ev_loop: asyncio.BaseEventLoop = asyncio.get_event_loop()
-        self.logger().debug(data_source_type)
-        self.logger().debug("Switcheo Order Book Tracker")
         self._data_source: Optional[OrderBookTrackerDataSource] = None
-        self.logger().debug(self._data_source)
         self._order_book_snapshot_stream: asyncio.Queue = asyncio.Queue()
-        print(self._order_book_snapshot_stream)
         self._order_book_diff_stream: asyncio.Queue = asyncio.Queue()
-        print(self._order_book_diff_stream)
         self._process_msg_deque_task: Optional[asyncio.Task] = None
-        print(self._process_msg_deque_task)
         self._past_diffs_windows: Dict[str, Deque] = {}
-        print(self._past_diffs_windows)
         self._order_books: Dict[str, SwitcheoOrderBook] = {}
-        print(self._order_books)
         self._saved_message_queues: Dict[str, Deque[SwitcheoOrderBookMessage]] = defaultdict(lambda: deque(maxlen=1000))
-        print(self._saved_message_queues)
         self._active_order_trackers: Dict[str, SwitcheoActiveOrderTracker] = defaultdict(SwitcheoActiveOrderTracker)
-        print(self._active_order_trackers)
         self._symbols: Optional[List[str]] = symbols
-        print(self._symbols)
+        self._sio = SocketIOClient()
 
     @property
     def data_source(self) -> OrderBookTrackerDataSource:
         if not self._data_source:
             if self._data_source_type is OrderBookTrackerDataSourceType.EXCHANGE_API:
-                self._data_source = SwitcheoAPIOrderBookDataSource(symbols=self._symbols)
+                self._data_source = SwitcheoAPIOrderBookDataSource(socketio_client=self._sio, symbols=self._symbols)
             else:
                 raise ValueError(f"data_source_type {self._data_source_type} is not supported.")
-        print(self._data_source)
+        self.logger().debug(f"Data Source: {self._data_source}")
         return self._data_source
 
     @property
     def exchange_name(self) -> str:
-        print("Switcheo exchange name")
         return "switcheo"
 
     async def start(self):
+        self.logger().debug("Start Order Book Tracker")
         await super().start()
-        self._order_book_diff_listener_task = safe_ensure_future(
-            self.data_source.listen_for_order_book_diffs(self._ev_loop, self._order_book_diff_stream)
-        )
-        self._order_book_snapshot_listener_task = safe_ensure_future(
-            self.data_source.listen_for_order_book_snapshots(self._ev_loop, self._order_book_snapshot_stream)
-        )
         self._refresh_tracking_task = safe_ensure_future(
             self._refresh_tracking_loop()
         )
@@ -99,13 +84,17 @@ class SwitcheoOrderBookTracker(OrderBookTracker):
             self._order_book_snapshot_router()
         )
 
+    def stop(self):
+        self.logger().debug("Stopping Socket IO Order Book Listener")
+        self._sio.disconnect()
+
     async def _refresh_tracking_tasks(self):
         """
         Starts tracking for any new trading pairs, and stop tracking for any inactive trading pairs.
         """
         tracking_symbols: Set[str] = set([key for key in self._tracking_tasks.keys()
                                           if not self._tracking_tasks[key].done()])
-        available_pairs: Dict[str, SwitcheoOrderBookTrackerEntry] = await self.data_source.get_tracking_pairs()
+        available_pairs: Dict[str, SwitcheoOrderBookTrackerEntry] = await self.data_source.get_tracking_pairs(self._order_book_snapshot_stream, self._order_book_diff_stream)
         available_symbols: Set[str] = set(available_pairs.keys())
         new_symbols: Set[str] = available_symbols - tracking_symbols
         deleted_symbols: Set[str] = tracking_symbols - available_symbols
@@ -130,6 +119,7 @@ class SwitcheoOrderBookTracker(OrderBookTracker):
         """
         Route the real-time order book diff messages to the correct order book.
         """
+        self.logger().debug("Order Book Diff Router")
         last_message_timestamp: float = time.time()
         messages_queued: int = 0
         messages_accepted: int = 0
@@ -195,6 +185,7 @@ class SwitcheoOrderBookTracker(OrderBookTracker):
                 await asyncio.sleep(5.0)
 
     async def _track_single_book(self, symbol: str):
+        self.logger().debug("Track Single Book")
         past_diffs_window: Deque[SwitcheoOrderBookMessage] = deque()
         self._past_diffs_windows[symbol] = past_diffs_window
 

@@ -176,7 +176,7 @@ cdef class SwitcheoMarket(MarketBase):
 
     @property
     def order_books(self) -> Dict[str, OrderBook]:
-        return self._order_book_tracker.order_books
+        return self._order_book_tracker._order_books
 
     @property
     def wallet(self) -> Web3Wallet:
