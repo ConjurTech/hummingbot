@@ -53,13 +53,13 @@ class OrderBooksNamespace(SocketIOClientNamespace):
         update_digest = data["digest"]
         update_pair = data["room"]["pair"]
         update_events = data["events"]
+        buy_event = False
+        sell_event = False
         if "symbol" in self.order_book[update_pair]["book"]:
             del self.order_book[update_pair]["book"]["symbol"]
         self.lock.acquire()
         for event in update_events:
             price_match = False
-            buy_event = False
-            sell_event = False
             event_iteration = 0
             if event["side"] == "buy":
                 event_side = "buys"
