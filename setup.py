@@ -41,6 +41,7 @@ def main():
         "hummingbot.market.huobi",
         "hummingbot.market.idex",
         "hummingbot.market.radar_relay",
+        "hummingbot.market.switcheo",
         "hummingbot.strategy",
         "hummingbot.strategy.arbitrage",
         "hummingbot.strategy.cross_exchange_market_making",
@@ -104,9 +105,9 @@ def main():
         "pytz",
         "pyyaml",
         "python-binance==0.6.9",
+        "python-switcheo==0.4.2",
         "python-socketio[client]",
         "sqlalchemy",
-        "switcheo==0.4.0",
         "ujson",
         "yarl",
     ]

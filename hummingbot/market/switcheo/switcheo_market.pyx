@@ -102,10 +102,10 @@ cdef class SwitcheoMarket(MarketBase):
 
     @classmethod
     def logger(cls) -> HummingbotLogger:
-        global im_logger
-        if im_logger is None:
-            im_logger = logging.getLogger(__name__)
-        return im_logger
+        global sm_logger
+        if sm_logger is None:
+            sm_logger = logging.getLogger(__name__)
+        return sm_logger
 
     def __init__(self,
                  wallet: Web3Wallet,

@@ -210,12 +210,15 @@ class SwitcheoAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
     async def listen_for_trades(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
         # Trade messages are received from the order book SocketIO web socket
+        self.logger().debug("listen_for_trades:")
         pass
 
     async def listen_for_order_book_diffs(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
+        self.logger().debug("listen_for_order_book_diffs:")
         # Order Book messages are received from the order book SocketIO web socket
         pass
 
     async def listen_for_order_book_snapshots(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
+        self.logger().debug("listen_for_order_book_snapshots:")
         # Order Book messages are received from the order book SocketIO web socket
         pass
