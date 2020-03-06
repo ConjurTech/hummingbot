@@ -17,11 +17,12 @@ from hummingbot.client.config.config_helpers import (
 )
 from hummingbot import (
     init_logging,
-    check_dev_mode
+    check_dev_mode,
+    chdir_to_data_directory
 )
 from hummingbot.client.ui.stdout_redirection import patch_stdout
-from hummingbot.core.management.console import start_management_console
 from hummingbot.core.utils.async_utils import safe_gather
+from hummingbot.core.utils.exchange_rate_conversion import ExchangeRateConversion
 
 
 def detect_available_port(starting_port: int) -> int:
@@ -39,12 +40,15 @@ def detect_available_port(starting_port: int) -> int:
 
 
 async def main():
+    chdir_to_data_directory()
+
     await create_yml_files()
 
     # This init_logging() call is important, to skip over the missing config warnings.
     init_logging("hummingbot_logs.yml")
 
     read_configs_from_yml()
+    ExchangeRateConversion.get_instance().start()
 
     hb = HummingbotApplication.main_application()
 
@@ -57,6 +61,11 @@ async def main():
                      dev_mode=dev_mode)
         tasks: List[Coroutine] = [hb.run()]
         if global_config_map.get("debug_console").value:
+            if not hasattr(__builtins__, "help"):
+                import _sitebuiltins
+                __builtins__.help = _sitebuiltins._Helper()
+
+            from hummingbot.core.management.console import start_management_console
             management_port: int = detect_available_port(8211)
             tasks.append(start_management_console(locals(), host="localhost", port=management_port))
         await safe_gather(*tasks)

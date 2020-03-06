@@ -12,6 +12,8 @@ from hummingbot.core.clock cimport Clock
 from hummingbot.logger import HummingbotLogger
 from hummingbot.core.data_type.limit_order cimport LimitOrder
 from hummingbot.core.data_type.limit_order import LimitOrder
+
+from libc.stdint cimport int64_t
 from hummingbot.core.data_type.order_book cimport OrderBook
 from hummingbot.market.market_base import MarketBase
 from hummingbot.market.market_base cimport MarketBase
@@ -98,13 +100,6 @@ cdef class GetOrderBookStrategy(StrategyBase):
 
     def format_status(self) -> str:
         cdef:
-            MarketBase maker_market
-            OrderBook maker_order_book
-            str maker_symbol
-            str maker_base
-            str maker_quote
-            double maker_base_balance
-            double maker_quote_balance
             list lines = []
             list warning_lines = []
             dict market_info_to_active_orders = self.market_info_to_active_orders

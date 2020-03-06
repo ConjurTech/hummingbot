@@ -41,3 +41,16 @@ Add more paper trade assets by editing `conf_global.yml` using a text editor. **
 
 !!! warning
     When adding balances, make sure to exit and restart Hummingbot for the changes to take effect.
+
+
+## Supported Connectors
+
+- Binance
+- Coinbase Pro
+- Huobi
+- Bamboo Relay
+- Radar Relay
+- Bittrex
+- Dolomite
+- Liquid
+- KuCoin

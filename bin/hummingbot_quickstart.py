@@ -30,6 +30,8 @@ from bin.hummingbot import (
     detect_available_port,
     main as normal_start,
 )
+from hummingbot.client.config.config_helpers import write_config_to_yml
+from hummingbot.core.utils.exchange_rate_conversion import ExchangeRateConversion
 
 
 class CmdlineParser(ThrowingArgumentParser):
@@ -48,10 +50,10 @@ class CmdlineParser(ThrowingArgumentParser):
                           type=str,
                           required=False,
                           help="Specify the wallet public key you would like to use.")
-        self.add_argument("--wallet-password", "-p",
+        self.add_argument("--config-password", "--wallet-password", "-p",
                           type=str,
                           required=False,
-                          help="Specify the password if you need to unlock your wallet.")
+                          help="Specify the password to unlock your encrypted files and wallets.")
 
 
 async def quick_start():
@@ -61,21 +63,28 @@ async def quick_start():
         strategy = args.strategy
         config_file_name = args.config_file_name
         wallet = args.wallet
-        wallet_password = args.wallet_password
+        password = args.config_password
 
         await create_yml_files()
         init_logging("hummingbot_logs.yml")
         read_configs_from_yml()
+        ExchangeRateConversion.get_instance().start()
+        await ExchangeRateConversion.get_instance().wait_till_ready()
         hb = HummingbotApplication.main_application()
 
+        in_memory_config_map.get("password").value = password
         in_memory_config_map.get("strategy").value = strategy
         in_memory_config_map.get("strategy").validate(strategy)
         in_memory_config_map.get("strategy_file_path").value = config_file_name
         in_memory_config_map.get("strategy_file_path").validate(config_file_name)
 
-        if wallet and wallet_password:
+        # To ensure quickstart runs with the default value of False for kill_switch_enabled if not present
+        if not global_config_map.get("kill_switch_enabled"):
+            global_config_map.get("kill_switch_enabled").value = False
+
+        if wallet and password:
             global_config_map.get("wallet").value = wallet
-            hb.acct = unlock_wallet(public_key=wallet, password=wallet_password)
+            hb.acct = unlock_wallet(public_key=wallet, password=password)
 
         if not hb.config_complete:
             config_map = load_required_configs()
@@ -89,7 +98,11 @@ async def quick_start():
                 hb.app.log("Running from dev branches. Full remote logging will be enabled.")
 
             log_level = global_config_map.get("log_level").value
-            init_logging("hummingbot_logs.yml", override_log_level=log_level, dev_mode=dev_mode)
+            init_logging("hummingbot_logs.yml",
+                         override_log_level=log_level,
+                         dev_mode=dev_mode,
+                         strategy_file_path=config_file_name)
+            await write_config_to_yml()
             hb.start(log_level)
 
             tasks: List[Coroutine] = [hb.run()]

@@ -1,18 +1,16 @@
 import asyncio
-import logging
-from six import string_types
 from typing import (
     List,
     Dict,
     Optional,
     Any,
 )
-
 from hummingbot.core.utils.wallet_setup import (
     create_and_save_wallet,
     import_and_save_wallet,
     list_wallets,
-    unlock_wallet
+    unlock_wallet,
+    save_wallet
 )
 from hummingbot.client.config.config_var import ConfigVar
 from hummingbot.client.config.in_memory_config_map import in_memory_config_map
@@ -23,9 +21,18 @@ from hummingbot.client.config.config_helpers import (
     load_required_configs,
     parse_cvar_value,
     copy_strategy_template,
+    parse_cvar_default_value_prompt
 )
 from hummingbot.core.utils.async_utils import safe_ensure_future
-
+from hummingbot.client.config.config_crypt import (
+    list_encrypted_file_paths,
+    decrypt_file,
+    decrypt_config_value,
+    encrypted_config_file_exists,
+    get_encrypted_config_path,
+    encrypt_n_save_config_value
+)
+from os import unlink
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from hummingbot.client.hummingbot_application import HummingbotApplication
@@ -69,8 +76,19 @@ class ConfigCommand:
         for key in keys:
             cvar = config_map.get(key)
             if cvar.value is None and cvar.required:
+                if cvar.is_secure and cvar.key != "wallet" and self.load_secure_var(cvar):
+                    continue
                 return False
         return True
+
+    @staticmethod
+    def load_secure_var(cvar):
+        if encrypted_config_file_exists(cvar):
+            password = in_memory_config_map.get("password").value
+            if password is not None:
+                cvar.value = decrypt_config_value(cvar, password)
+                return True
+        return False
 
     @staticmethod
     def _get_empty_configs() -> List[str]:
@@ -105,15 +123,18 @@ class ConfigCommand:
 
         if self.strategy:
             choice = await self.app.prompt(prompt=f"Would you like to stop running the {strategy} strategy "
-                                                  f"and reconfigure the bot? (y/n) >>> ")
+                                                  f"and reconfigure the bot? (Yes/No) >>> ")
         else:
-            choice = await self.app.prompt(prompt=f"Would you like to reconfigure the bot? (y/n) >>> ")
+            choice = await self.app.prompt(prompt=f"Would you like to reconfigure the bot? (Yes/No) >>> ")
 
         self.app.change_prompt(prompt=">>> ")
         self.app.toggle_hide_input()
         self.placeholder_mode = False
 
         if choice.lower() in {"y", "yes"}:
+            # Clear application states that are specific to config
+            self.starting_balances = {}
+
             if self.strategy:
                 await self.stop_loop()
             if key is None:
@@ -137,8 +158,7 @@ class ConfigCommand:
         choice = await self.app.prompt(prompt=global_config_map.get("wallet").prompt)
         if choice == "import":
             private_key = await self.app.prompt(prompt="Your wallet private key >>> ", is_password=True)
-            password = await self.app.prompt(prompt="A password to protect your wallet key >>> ", is_password=True)
-
+            password = in_memory_config_map["password"].value
             try:
                 self.acct = import_and_save_wallet(password, private_key)
                 self._notify("Wallet %s imported into hummingbot" % (self.acct.address,))
@@ -147,7 +167,7 @@ class ConfigCommand:
                 result = await self._create_or_import_wallet()
                 return result
         elif choice == "create":
-            password = await self.app.prompt(prompt="A password to protect your wallet key >>> ", is_password=True)
+            password = in_memory_config_map["password"].value
             self.acct = create_and_save_wallet(password)
             self._notify("New wallet %s created" % (self.acct.address,))
         else:
@@ -161,7 +181,7 @@ class ConfigCommand:
         """
         Special handler function that helps the user unlock an existing wallet, or redirect user to create a new wallet.
         """
-        choice = await self.app.prompt(prompt="Would you like to unlock your previously saved wallet? (y/n) >>> ")
+        choice = await self.app.prompt(prompt="Would you like to unlock your previously saved wallet? (Yes/No) >>> ")
         if choice.lower() in {"y", "yes"}:
             wallets = list_wallets()
             self._notify("Existing wallets:")
@@ -170,16 +190,29 @@ class ConfigCommand:
                 public_key = wallets[0]
             else:
                 public_key = await self.app.prompt(prompt="Which wallet would you like to import ? >>> ")
-            password = await self.app.prompt(prompt="Enter your password >>> ", is_password=True)
+            password = in_memory_config_map["password"].value
             try:
                 acct = unlock_wallet(public_key=public_key, password=password)
                 self._notify("Wallet %s unlocked" % (acct.address,))
                 self.acct = acct
                 return self.acct.address
-            except Exception:
-                self._notify("Cannot unlock wallet. Please try again.")
-                result = await self._unlock_wallet()
-                return result
+            except ValueError as err:
+                if str(err) != "MAC mismatch":
+                    raise err
+                self._notify("The wallet was locked by a different password.")
+                old_password = await self.app.prompt(prompt="Please enter the password >>> ", is_password=True)
+                try:
+                    acct = unlock_wallet(public_key=public_key, password=old_password)
+                    self._notify("Wallet %s unlocked" % (acct.address,))
+                    save_wallet(acct, password)
+                    self._notify(f"Wallet {acct.address} is now saved with your main password.")
+                    self.acct = acct
+                    return self.acct.address
+                except ValueError as err:
+                    if str(err) != "MAC mismatch":
+                        raise err
+                    self._notify("Cannot unlock wallet. Please try again.")
+                    return await self._unlock_wallet()
         else:
             value = await self._create_or_import_wallet()
             return value
@@ -199,16 +232,55 @@ class ConfigCommand:
             self._notify(f"Loading previously saved config file from {strategy_path}...")
         elif choice == "create":
             strategy_path = await copy_strategy_template(current_strategy)
-            self._notify(f"new config file at {strategy_path} created.")
+            self._notify(f"A new config file {strategy_path} created.")
+            self._notify(f"Please see https://docs.hummingbot.io/strategies/{current_strategy.replace('_', '-')}/ "
+                         f"while setting up these below configuration.")
         else:
             self._notify('Invalid choice. Please enter "create" or "import".')
             strategy_path = await self._import_or_create_strategy_config()
-
-        # Validate response
-        if not strategy_file_path_cv.validate(strategy_path):
-            self._notify(f"Invalid path {strategy_path}. Please enter \"create\" or \"import\".")
-            strategy_path = await self._import_or_create_strategy_config()
         return strategy_path
+
+    async def _one_password_config(self,  # type: HummingbotApplication
+                                   ):
+        """
+        Special handler function to handle one password unlocking all secure conf variable and wallets
+            - let a user creates a new password if there is no existing encrypted_files or key_files.
+            - verify the entered password is valid by trying to unlock files.
+        """
+        encrypted_files = list_encrypted_file_paths()
+        wallets = list_wallets()
+        password_valid = False
+        err_msg = "Invalid password, please try again."
+        if not encrypted_files and not wallets:
+            password = await self.app.prompt(prompt="Enter your new password >>> ", is_password=True)
+            re_password = await self.app.prompt(prompt="Please reenter your password >>> ", is_password=True)
+            if password == re_password:
+                password_valid = True
+            else:
+                err_msg = "Passwords entered do not match, please try again."
+        else:
+            password = await self.app.prompt(prompt="Enter your password >>> ", is_password=True)
+            if encrypted_files:
+                try:
+                    decrypt_file(encrypted_files[0], password)
+                    password_valid = True
+                except ValueError as err:
+                    if str(err) != "MAC mismatch":
+                        raise err
+            else:
+                for wallet in wallets:
+                    try:
+                        unlock_wallet(public_key=wallet, password=password)
+                        password_valid = True
+                        break
+                    except ValueError as err:
+                        if str(err) != "MAC mismatch":
+                            raise err
+        if password_valid:
+            return password
+        else:
+            self._notify(err_msg)
+            return await self._one_password_config()
 
     async def prompt_single_variable(self,  # type: HummingbotApplication
                                      cvar: ConfigVar,
@@ -221,6 +293,8 @@ class ConfigCommand:
         :return: a validated user input or the variable's default value
         """
         if cvar.required or requirement_overwrite:
+            if cvar.key == "password":
+                return await self._one_password_config()
             if cvar.key == "strategy_file_path":
                 val = await self._import_or_create_strategy_config()
             elif cvar.key == "wallet":
@@ -229,15 +303,22 @@ class ConfigCommand:
                     val = await self._unlock_wallet()
                 else:
                     val = await self._create_or_import_wallet()
-                logging.getLogger("hummingbot.public_eth_address").info(val)
             else:
+                if cvar.value is None:
+                    self.app.set_text(parse_cvar_default_value_prompt(cvar))
                 val = await self.app.prompt(prompt=cvar.prompt, is_password=cvar.is_secure)
+
             if not cvar.validate(val):
-                self._notify("%s is not a valid %s value" % (val, cvar.key))
-                val = await self.prompt_single_variable(cvar, requirement_overwrite)
+                # If the user inputs an empty string, use the default
+                val_is_empty = val is None or (isinstance(val, str) and len(val) == 0)
+                if cvar.default is not None and val_is_empty:
+                    val = cvar.default
+                else:
+                    self._notify("%s is not a valid %s value" % (val, cvar.key))
+                    val = await self.prompt_single_variable(cvar, requirement_overwrite)
         else:
             val = cvar.value
-        if val is None or (isinstance(val, string_types) and len(val) == 0):
+        if val is None or (isinstance(val, str) and len(val) == 0):
             val = cvar.default
         return val
 
@@ -269,8 +350,12 @@ class ConfigCommand:
         """
         for key in keys:
             cv: ConfigVar = self._get_config_var_with_key(key)
+            if cv.value is not None and cv.key != "wallet":
+                continue
             value = await self.prompt_single_variable(cv, requirement_overwrite=False)
             cv.value = parse_cvar_value(cv, value)
+            if self.config_complete:
+                break
         if not self.config_complete:
             await self._inner_config_loop(self._get_empty_configs())
 
@@ -311,12 +396,15 @@ class ConfigCommand:
             cv: ConfigVar = self._get_config_var_with_key(key)
             value = await self.prompt_single_variable(cv, requirement_overwrite=True)
             cv.value = parse_cvar_value(cv, value)
-            await write_config_to_yml()
+            if cv.is_secure:
+                await self._encrypt_n_save_config_value(cv)
+            else:
+                await write_config_to_yml()
             self._notify(f"\nNew config saved:\n{key}: {str(value)}")
 
             if not self.config_complete:
                 choice = await self.app.prompt("Your configuration is incomplete. Would you like to proceed and "
-                                               "finish all necessary configurations? (y/n) >>> ")
+                                               "finish all necessary configurations? (Yes/No) >>> ")
                 if choice.lower() in {"y", "yes"}:
                     self.config()
                     return
@@ -330,3 +418,12 @@ class ConfigCommand:
             self.app.toggle_hide_input()
             self.placeholder_mode = False
             self.app.change_prompt(prompt=">>> ")
+
+    async def _encrypt_n_save_config_value(self,  # type: HummingbotApplication
+                                           cvar: ConfigVar):
+        if in_memory_config_map.get("password").value is None:
+            in_memory_config_map.get("password").value = await self._one_password_config()
+        password = in_memory_config_map.get("password").value
+        if encrypted_config_file_exists(cvar):
+            unlink(get_encrypted_config_path(cvar))
+        encrypt_n_save_config_value(cvar, password)

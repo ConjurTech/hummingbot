@@ -39,7 +39,7 @@ The Hummingbot team will investigate your report within 24 hours, contact you to
 
 In this section, we will publish a list of reported bugs and their status.
 
-## Bounty distribution (As of 8/31/2019)
+## Bounty distribution (As of 11/05/2019)
 ETH Address (First 6 digits) | Bugs Reported | Github Issue | Paid?
 ---|---|---|---
  0x93cF | Missing logs file | NA | Y
@@ -57,6 +57,19 @@ ETH Address (First 6 digits) | Bugs Reported | Github Issue | Paid?
  0xFcba | Trades for taker market > maker market | [#627](https://github.com/CoinAlpha/hummingbot/issues/627) | Y 
  0x2212 | Bounties "Filled volume" remain constant | [#644](https://github.com/CoinAlpha/hummingbot/issues/644) | Y 
  0xf01E | export_trades command will only export 100 trades | [#677](https://github.com/CoinAlpha/hummingbot/issues/677) | Y 
+ 0x1309 | Discovery fails when processing market pair | [#721](https://github.com/CoinAlpha/hummingbot/issues/721) | Y 
+ 0x2A60 | Stop command causes "cancelled order" | [#723](https://github.com/CoinAlpha/hummingbot/issues/723) | Y 
  0x8950 | Token symbol format for Discovery configuration | [#724](https://github.com/CoinAlpha/hummingbot/issues/724) | Y 
+ 0xd8fb | Bounty Status server error | [#754](https://github.com/CoinAlpha/hummingbot/issues/754) | Y 
+ 0x1D95 | 0 day remote command execution | [#555](https://github.com/CoinAlpha/hummingbot/issues/555) | Y 
+ 0x09B4 | Huobi assets are not displayed when using cross exchange MM | [#826](https://github.com/CoinAlpha/hummingbot/issues/826) | Y  
+ 0xe363 | XEMM not placing orders in empty maker market | [#854](https://github.com/CoinAlpha/hummingbot/issues/854) | Y  
+ 0x75e8 | Volume traded from Oct 10 - 13 are missing | [#918](https://github.com/CoinAlpha/hummingbot/issues/918) | Y 
+ 0x21a0 | code bug in ddex_market.pyx | [#923](https://github.com/CoinAlpha/hummingbot/issues/923) | Y  
+ 0x5a83 | Error running performance analysis while in paper trade arbitrage strategy | [#974](https://github.com/CoinAlpha/hummingbot/issues/974) | Y   
+ 0x8b5d | Inventory skew enabled causes order size becomes less than allowed on Bittrex | [#1092](https://github.com/CoinAlpha/hummingbot/issues/1092) | Y   
+ 0x887c | Cross-exchange MM strategy has incorrect price calculation with BUSD as base token | [#1120](https://github.com/CoinAlpha/hummingbot/issues/1120) | Y   
+ 0x8264 | Liquid connector on non-fiat quote asset | [#1331](https://github.com/CoinAlpha/hummingbot/issues/1331) | Y   
+ 0x5447 | Liquid, bot stuck when using pure market making for trading pair TRX-BTC | [#1375](https://github.com/CoinAlpha/hummingbot/issues/1375) | Y  
 
 **Happy 🐞 hunting!**

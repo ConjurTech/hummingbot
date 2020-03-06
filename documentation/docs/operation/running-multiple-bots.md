@@ -2,15 +2,13 @@
 
 ## Multiple bots via Docker
 
-Create multiple instances using `./create.sh` script or `docker run..` command (see [Create Hummingbot Instance](/cheatsheets/docker/#create-hummingbot-instance)).
+Create multiple instances using `./create.sh` script. More information can be found in [Create Hummingbot Instance](/cheatsheets/docker/#create-hummingbot-instance).
 
 ### Running in the background (via Docker)
 
-Press keys `Ctrl+P` then `Ctrl+Q` in sequence to detach from Docker (i.e. return to command line). This exits out of Hummingbot without shutting down the container instance.
+Press keys `Ctrl+P` then `Ctrl+Q` in sequence to detach from Docker i.e. return to command line. This exits out of Hummingbot without shutting down the container instance.
 
-Restart or connect to a running instance using `./start.sh` or `docker start.. && docker attach..` command (see [Restarting Hummingbot after Shutdown Closing the Window](/cheatsheets/docker/#restarting-hummingbot-after-shutdown-or-closing-the-window)).
-
-For more information: [Docker Commands](/cheatsheets/docker/#reference-useful-docker-commands)
+Restart or connect to a running instance using `./start.sh` command. Refer to [Restarting Hummingbot after Shutdown Closing the Window](/cheatsheets/docker/#restarting-hummingbot-after-shutdown-or-closing-the-window).
 
 
 ## Multiple bots from source
@@ -36,7 +34,12 @@ conda activate hummingbot
 
 ### Running in the background (from source)
 
-To run an instance in the background, run either of the following commands: `screen` or `screen -S $NAME`, where `$NAME` is what you wish to call this background instance. Use the latter to be more explicit if you want to run multiple bots.
+Use either `tmux` or `screen` to run multiple bots installed from source. Check out these external links how to use them.
+
+* [Getting started with Tmux](https://linuxize.com/post/getting-started-with-tmux/)
+* [How to use Linux Screen](https://linuxize.com/post/how-to-use-linux-screen/)
+
+When using screen to run an instance in the background, run either of the following commands: `screen` or `screen -S $NAME`, where `$NAME` is what you wish to call this background instance. Use the latter to be more explicit if you want to run multiple bots.
 
 Navigate to the folder where your separate Hummingbot is installed, then start the bot like normal.
 

@@ -9,6 +9,8 @@ import logging; logging.basicConfig(level=logging.ERROR)
 import pandas as pd
 from typing import List
 import unittest
+import time
+import asyncio
 
 from hummingsim.backtest.backtest_market import BacktestMarket
 from hummingsim.backtest.market import (
@@ -44,8 +46,43 @@ from hummingbot.strategy.pure_market_making import (
     ConstantSizeSizingDelegate,
     StaggeredMultipleSizeSizingDelegate,
     InventorySkewSingleSizeSizingDelegate,
-    InventorySkewMultipleSizeSizingDelegate
+    InventorySkewMultipleSizeSizingDelegate,
+    OrderBookAssetPriceDelegate,
+    DataFeedAssetPriceDelegate,
+    APIAssetPriceDelegate
 )
+from hummingbot.data_feed.data_feed_base import DataFeedBase
+from hummingbot.core.utils.exchange_rate_conversion import ExchangeRateConversion
+from hummingbot.core.network_base import NetworkStatus
+
+
+class MockDataFeed(DataFeedBase):
+
+    @property
+    def name(self):
+        return self._name
+
+    def __init__(self, name, coin_prices):
+        super().__init__()
+        self._name = name
+        self._mock_price_dict = coin_prices
+        self._network_status = NetworkStatus.CONNECTED
+
+    async def check_network(self) -> NetworkStatus:
+        return NetworkStatus.CONNECTED
+
+    @property
+    def price_dict(self):
+        return self._mock_price_dict
+
+    def get_price(self, trading_pair):
+        return self._mock_price_dict.get(trading_pair.upper())
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
 
 
 class PureMarketMakingV2UnitTest(unittest.TestCase):
@@ -53,13 +90,13 @@ class PureMarketMakingV2UnitTest(unittest.TestCase):
     end: pd.Timestamp = pd.Timestamp("2019-01-01 01:00:00", tz="UTC")
     start_timestamp: float = start.timestamp()
     end_timestamp: float = end.timestamp()
-    maker_symbols: List[str] = ["COINALPHA-WETH", "COINALPHA", "WETH"]
+    maker_trading_pairs: List[str] = ["COINALPHA-WETH", "COINALPHA", "WETH"]
 
     def setUp(self):
         self.clock: Clock = Clock(ClockMode.BACKTEST, 60.0, self.start_timestamp, self.end_timestamp)
         self.clock_tick_size = 60
         self.maker_market: BacktestMarket = BacktestMarket()
-        self.maker_data: MockOrderBookLoader = MockOrderBookLoader(*self.maker_symbols)
+        self.maker_data: MockOrderBookLoader = MockOrderBookLoader(*self.maker_trading_pairs)
         self.mid_price = 100
         self.bid_threshold = 0.01
         self.ask_threshold = 0.01
@@ -67,24 +104,25 @@ class PureMarketMakingV2UnitTest(unittest.TestCase):
         self.maker_data.set_balanced_order_book(mid_price=self.mid_price, min_price=1,
                                                 max_price=200, price_step_size=1, volume_step_size=10)
 
-        self.constant_pricing_delegate = ConstantSpreadPricingDelegate(self.bid_threshold, self.ask_threshold)
-        self.constant_sizing_delegate = ConstantSizeSizingDelegate(1.0)
+        self.constant_pricing_delegate = ConstantSpreadPricingDelegate(Decimal(self.bid_threshold),
+                                                                       Decimal(self.ask_threshold))
+        self.constant_sizing_delegate = ConstantSizeSizingDelegate(Decimal("1.0"))
         self.filter_delegate = PassThroughFilterDelegate()
         self.equal_strategy_sizing_delegate = StaggeredMultipleSizeSizingDelegate(
-            order_start_size=1.0,
-            order_step_size=0,
-            number_of_orders=5
+            order_start_size=Decimal("1.0"),
+            order_step_size=Decimal("0"),
+            number_of_orders=Decimal("5")
         )
         self.staggered_strategy_sizing_delegate = StaggeredMultipleSizeSizingDelegate(
-            order_start_size=1.0,
-            order_step_size=0.5,
-            number_of_orders=5
+            order_start_size=Decimal("1.0"),
+            order_step_size=Decimal("0.5"),
+            number_of_orders=Decimal("5")
         )
         self.multiple_order_strategy_pricing_delegate = ConstantMultipleSpreadPricingDelegate(
-            bid_spread=self.bid_threshold,
-            ask_spread=self.ask_threshold,
-            order_interval_size=0.01,
-            number_of_orders=5
+            bid_spread=Decimal(self.bid_threshold),
+            ask_spread=Decimal(self.ask_threshold),
+            order_interval_size=Decimal("0.01"),
+            number_of_orders=Decimal("5")
         )
 
         self.maker_market.add_data(self.maker_data)
@@ -93,13 +131,13 @@ class PureMarketMakingV2UnitTest(unittest.TestCase):
         self.maker_market.set_balance("QETH", 500)
         self.maker_market.set_quantization_param(
             QuantizationParams(
-                self.maker_symbols[0], 6, 6, 6, 6
+                self.maker_trading_pairs[0], 6, 6, 6, 6
             )
         )
 
         self.market_info: MarketTradingPairTuple = MarketTradingPairTuple(
             *(
-                [self.maker_market] + self.maker_symbols
+                [self.maker_market] + self.maker_trading_pairs
             )
         )
 
@@ -159,11 +197,80 @@ class PureMarketMakingV2UnitTest(unittest.TestCase):
             filter_delegate=self.filter_delegate,
             pricing_delegate=self.constant_pricing_delegate,
             sizing_delegate=self.constant_sizing_delegate,
-            jump_orders_enabled=True,
+            best_bid_ask_jump_mode=True,
             cancel_order_wait_time=900,
             filled_order_replenish_wait_time=80,
             enable_order_filled_stop_cancellation=True,
             logging_options=logging_options
+        )
+
+        self.ext_market: BacktestMarket = BacktestMarket()
+        self.ext_data: MockOrderBookLoader = MockOrderBookLoader(*self.maker_trading_pairs)
+        self.ext_market_info: MarketTradingPairTuple = MarketTradingPairTuple(
+            self.ext_market, *self.maker_trading_pairs
+        )
+        self.ext_data.set_balanced_order_book(mid_price=50, min_price=1, max_price=400,
+                                         price_step_size=1, volume_step_size=10)
+        self.ext_market.add_data(self.ext_data)
+        self.asset_del = OrderBookAssetPriceDelegate(self.ext_market, self.maker_trading_pairs[0])
+        self.ext_exc_price_strategy: PureMarketMakingStrategyV2 = PureMarketMakingStrategyV2(
+            [self.market_info],
+            filled_order_replenish_wait_time=self.cancel_order_wait_time,
+            filter_delegate=self.filter_delegate,
+            sizing_delegate=self.constant_sizing_delegate,
+            pricing_delegate=self.constant_pricing_delegate,
+            cancel_order_wait_time=45,
+            logging_options=logging_options,
+            asset_price_delegate=self.asset_del
+        )
+
+        self.multi_orders_ext_exc_price_strategy: PureMarketMakingStrategyV2 = PureMarketMakingStrategyV2(
+            [self.market_info],
+            filled_order_replenish_wait_time=self.cancel_order_wait_time,
+            filter_delegate=self.filter_delegate,
+            sizing_delegate=self.equal_strategy_sizing_delegate,
+            pricing_delegate=self.multiple_order_strategy_pricing_delegate,
+            cancel_order_wait_time=45,
+            logging_options=logging_options,
+            asset_price_delegate=self.asset_del
+        )
+
+        ExchangeRateConversion.set_global_exchange_rate_config({
+            "global_config": {
+                self.maker_trading_pairs[1]: {"default": 200, "source": "mock_data_feed"},
+                self.maker_trading_pairs[2]: {"default": 1, "source": "mock_data_feed"}
+            },
+            "default_data_feed": "mock_data_feed"
+        })
+        mock_feed = MockDataFeed("mock_data_feed", {self.maker_trading_pairs[1]:200, self.maker_trading_pairs[2]:1})
+        ExchangeRateConversion.set_data_feeds([
+            mock_feed
+        ])
+        ExchangeRateConversion.set_update_interval(0.1)
+        ExchangeRateConversion.get_instance().start()
+        time.sleep(1)
+        self.feed_asset_del = DataFeedAssetPriceDelegate(self.maker_trading_pairs[1], self.maker_trading_pairs[2])
+
+        self.ext_feed_price_strategy: PureMarketMakingStrategyV2 = PureMarketMakingStrategyV2(
+            [self.market_info],
+            filled_order_replenish_wait_time=self.cancel_order_wait_time,
+            filter_delegate=self.filter_delegate,
+            sizing_delegate=self.constant_sizing_delegate,
+            pricing_delegate=self.constant_pricing_delegate,
+            cancel_order_wait_time=45,
+            logging_options=logging_options,
+            asset_price_delegate=self.feed_asset_del
+        )
+
+        self.multi_orders_ext_feed_price_strategy: PureMarketMakingStrategyV2 = PureMarketMakingStrategyV2(
+            [self.market_info],
+            filled_order_replenish_wait_time=self.cancel_order_wait_time,
+            filter_delegate=self.filter_delegate,
+            sizing_delegate=self.equal_strategy_sizing_delegate,
+            pricing_delegate=self.multiple_order_strategy_pricing_delegate,
+            cancel_order_wait_time=45,
+            logging_options=logging_options,
+            asset_price_delegate=self.feed_asset_del
         )
 
         self.logging_options = logging_options
@@ -175,10 +282,10 @@ class PureMarketMakingV2UnitTest(unittest.TestCase):
         self.maker_market.add_listener(MarketEvent.OrderCancelled, self.cancel_order_logger)
 
     def simulate_maker_market_trade(self, is_buy: bool, quantity: float):
-        maker_symbol: str = self.maker_symbols[0]
-        order_book: OrderBook = self.maker_market.get_order_book(maker_symbol)
+        maker_trading_pair: str = self.maker_trading_pairs[0]
+        order_book: OrderBook = self.maker_market.get_order_book(maker_trading_pair)
         trade_event: OrderBookTradeEvent = OrderBookTradeEvent(
-            maker_symbol,
+            maker_trading_pair,
             self.clock.current_timestamp,
             TradeType.BUY if is_buy else TradeType.SELL,
             (self.mid_price * (1 - self.bid_threshold - 0.01)
@@ -209,8 +316,8 @@ class PureMarketMakingV2UnitTest(unittest.TestCase):
 
     @staticmethod
     def simulate_limit_order_fill(market: Market, limit_order: LimitOrder):
-        quote_currency_traded: float = float(float(limit_order.price) * float(limit_order.quantity))
-        base_currency_traded: float = float(limit_order.quantity)
+        quote_currency_traded: Decimal = limit_order.price * limit_order.quantity
+        base_currency_traded: Decimal = limit_order.quantity
         quote_currency: str = limit_order.quote_currency
         base_currency: str = limit_order.base_currency
         config: MarketConfig = market.config
@@ -221,12 +328,12 @@ class PureMarketMakingV2UnitTest(unittest.TestCase):
             market.trigger_event(MarketEvent.OrderFilled, OrderFilledEvent(
                 market.current_timestamp,
                 limit_order.client_order_id,
-                limit_order.symbol,
+                limit_order.trading_pair,
                 TradeType.BUY,
                 OrderType.LIMIT,
-                float(limit_order.price),
-                float(limit_order.quantity),
-                TradeFee(0.0)
+                limit_order.price,
+                limit_order.quantity,
+                TradeFee(Decimal("0.0"))
             ))
             market.trigger_event(MarketEvent.BuyOrderCompleted, BuyOrderCompletedEvent(
                 market.current_timestamp,
@@ -236,7 +343,7 @@ class PureMarketMakingV2UnitTest(unittest.TestCase):
                 base_currency if config.buy_fees_asset is AssetType.BASE_CURRENCY else quote_currency,
                 base_currency_traded,
                 quote_currency_traded,
-                0.0,
+                Decimal("0.0"),
                 OrderType.LIMIT
             ))
         else:
@@ -245,12 +352,12 @@ class PureMarketMakingV2UnitTest(unittest.TestCase):
             market.trigger_event(MarketEvent.OrderFilled, OrderFilledEvent(
                 market.current_timestamp,
                 limit_order.client_order_id,
-                limit_order.symbol,
+                limit_order.trading_pair,
                 TradeType.SELL,
                 OrderType.LIMIT,
-                float(limit_order.price),
-                float(limit_order.quantity),
-                TradeFee(0.0)
+                limit_order.price,
+                limit_order.quantity,
+                TradeFee(Decimal("0.0"))
             ))
             market.trigger_event(MarketEvent.SellOrderCompleted, SellOrderCompletedEvent(
                 market.current_timestamp,
@@ -260,7 +367,7 @@ class PureMarketMakingV2UnitTest(unittest.TestCase):
                 base_currency if config.sell_fees_asset is AssetType.BASE_CURRENCY else quote_currency,
                 base_currency_traded,
                 quote_currency_traded,
-                0.0,
+                Decimal("0.0"),
                 OrderType.LIMIT
             ))
 
@@ -477,6 +584,117 @@ class PureMarketMakingV2UnitTest(unittest.TestCase):
         self.assertEqual(1, len(bid_fills))
         self.assertEqual(1, len(ask_fills))
         self.maker_order_fill_logger.clear()
+
+    def test_external_exchange_price_source(self):
+        self.clock.remove_iterator(self.strategy)
+        self.clock.add_iterator(self.ext_exc_price_strategy)
+        end_ts = self.start_timestamp + self.clock_tick_size
+        self.clock.backtest_til(end_ts)
+
+        self.assertEqual(1, len(self.ext_exc_price_strategy.active_bids))
+        # There should be no sell order, since its price will be below first bid order on the order book.
+        self.assertEqual(0, len(self.ext_exc_price_strategy.active_asks))
+
+        # check price data from external exchange is used for order placement
+        bid_order: LimitOrder = self.ext_exc_price_strategy.active_bids[0][1]
+        self.assertEqual(Decimal("49.5"), bid_order.price)
+        self.assertEqual(Decimal("1.0"), bid_order.quantity)
+
+    def test_external_exchange_price_source_empty_orderbook(self):
+        self.simulate_order_book_widening(self.maker_data.order_book, 0, 10000)
+        self.assertEqual(0, len(list(self.maker_data.order_book.bid_entries())))
+        self.assertEqual(0, len(list(self.maker_data.order_book.ask_entries())))
+        self.clock.remove_iterator(self.strategy)
+        self.clock.add_iterator(self.ext_exc_price_strategy)
+        end_ts = self.start_timestamp + self.clock_tick_size
+        self.clock.backtest_til(end_ts)
+
+        self.assertEqual(1, len(self.ext_exc_price_strategy.active_bids))
+        self.assertEqual(1, len(self.ext_exc_price_strategy.active_asks))
+
+        # check price data from external exchange is used for order placement
+        bid_order: LimitOrder = self.ext_exc_price_strategy.active_bids[0][1]
+        self.assertEqual(Decimal("49.5"), bid_order.price)
+        self.assertEqual(Decimal("1.0"), bid_order.quantity)
+        ask_order: LimitOrder = self.ext_exc_price_strategy.active_asks[0][1]
+        self.assertEqual(Decimal("50.5"), ask_order.price)
+        self.assertEqual(Decimal("1.0"), ask_order.quantity)
+
+    def test_multi_order_external_exchange_price_source(self):
+        self.clock.remove_iterator(self.strategy)
+        self.clock.add_iterator(self.multi_orders_ext_exc_price_strategy)
+        self.clock.backtest_til(self.start_timestamp + self.clock_tick_size)
+        self.assertEqual(5, len(self.multi_orders_ext_exc_price_strategy.active_bids))
+        self.assertEqual(0, len(self.multi_orders_ext_exc_price_strategy.active_asks))
+
+        first_bid_order: LimitOrder = self.multi_orders_ext_exc_price_strategy.active_bids[0][1]
+        self.assertEqual(Decimal("49.5"), first_bid_order.price)
+        self.assertEqual(Decimal("1.0"), first_bid_order.quantity)
+
+        last_bid_order: LimitOrder = self.multi_orders_ext_exc_price_strategy.active_bids[-1][1]
+        last_bid_price = Decimal(49.5 * (1 - 0.01) ** 4).quantize(Decimal("0.001"))
+        self.assertAlmostEqual(last_bid_price, last_bid_order.price, 3)
+        self.assertEqual(Decimal("1.0"), last_bid_order.quantity)
+
+    def test_multi_order_external_exchange_price_source_empty_order_book(self):
+        self.simulate_order_book_widening(self.maker_data.order_book, 0, 10000)
+        self.assertEqual(0, len(list(self.maker_data.order_book.bid_entries())))
+        self.assertEqual(0, len(list(self.maker_data.order_book.ask_entries())))
+        self.clock.remove_iterator(self.strategy)
+        self.clock.add_iterator(self.multi_orders_ext_exc_price_strategy)
+        self.clock.backtest_til(self.start_timestamp + self.clock_tick_size)
+        self.assertEqual(5, len(self.multi_orders_ext_exc_price_strategy.active_bids))
+        self.assertEqual(5, len(self.multi_orders_ext_exc_price_strategy.active_asks))
+
+        first_bid_order: LimitOrder = self.multi_orders_ext_exc_price_strategy.active_bids[0][1]
+        self.assertEqual(Decimal("49.5"), first_bid_order.price)
+        self.assertEqual(Decimal("1.0"), first_bid_order.quantity)
+        first_ask_order: LimitOrder = self.multi_orders_ext_exc_price_strategy.active_asks[0][1]
+        self.assertEqual(Decimal("50.5"), first_ask_order.price)
+        self.assertEqual(Decimal("1.0"), first_ask_order.quantity)
+
+        last_bid_order: LimitOrder = self.multi_orders_ext_exc_price_strategy.active_bids[-1][1]
+        last_bid_price = Decimal(49.5 * (1 - 0.01) ** 4).quantize(Decimal("0.001"))
+        self.assertAlmostEqual(last_bid_price, last_bid_order.price, 3)
+        self.assertEqual(Decimal("1.0"), last_bid_order.quantity)
+        last_ask_order: LimitOrder = self.multi_orders_ext_exc_price_strategy.active_asks[-1][1]
+        last_ask_price = Decimal(50.5 * (1 + 0.01) ** 4).quantize(Decimal("0.001"))
+        self.assertAlmostEqual(last_ask_price, last_ask_order.price, 3)
+        self.assertEqual(Decimal("1.0"), last_ask_order.quantity)
+
+    def test_external_feed_price_source(self):
+        self.clock.remove_iterator(self.strategy)
+        self.clock.add_iterator(self.ext_feed_price_strategy)
+        end_ts = self.start_timestamp + self.clock_tick_size
+        self.clock.backtest_til(end_ts)
+
+        self.assertEqual(0, len(self.ext_feed_price_strategy.active_bids))
+        self.assertEqual(1, len(self.ext_feed_price_strategy.active_asks))
+
+        # check price data from external exchange is used for order placement
+        ask_order: LimitOrder = self.ext_feed_price_strategy.active_asks[0][1]
+        self.assertEqual(Decimal("202"), ask_order.price)
+        self.assertEqual(Decimal("1.0"), ask_order.quantity)
+
+    def test_external_feed_price_source_empty_orderbook(self):
+        self.simulate_order_book_widening(self.maker_data.order_book, 0, 10000)
+        self.assertEqual(0, len(list(self.maker_data.order_book.bid_entries())))
+        self.assertEqual(0, len(list(self.maker_data.order_book.ask_entries())))
+        self.clock.remove_iterator(self.strategy)
+        self.clock.add_iterator(self.ext_feed_price_strategy)
+        end_ts = self.start_timestamp + self.clock_tick_size
+        self.clock.backtest_til(end_ts)
+
+        self.assertEqual(1, len(self.ext_feed_price_strategy.active_bids))
+        self.assertEqual(1, len(self.ext_feed_price_strategy.active_asks))
+
+        # check price data from external exchange is used for order placement
+        bid_order: LimitOrder = self.ext_feed_price_strategy.active_bids[0][1]
+        self.assertEqual(Decimal("198"), bid_order.price)
+        self.assertEqual(Decimal("1.0"), bid_order.quantity)
+        ask_order: LimitOrder = self.ext_feed_price_strategy.active_asks[0][1]
+        self.assertEqual(Decimal("202"), ask_order.price)
+        self.assertEqual(Decimal("1.0"), ask_order.quantity)
 
     def test_multiple_orders_equal_sizes(self):
         self.clock.remove_iterator(self.strategy)
@@ -711,7 +929,7 @@ class PureMarketMakingV2UnitTest(unittest.TestCase):
         self.clock.remove_iterator(self.strategy)
         self.clock.remove_iterator(self.maker_market)
         self.maker_market_2: BacktestMarket = BacktestMarket()
-        self.maker_data_2: MockOrderBookLoader = MockOrderBookLoader(*self.maker_symbols)
+        self.maker_data_2: MockOrderBookLoader = MockOrderBookLoader(*self.maker_trading_pairs)
         self.maker_data_2.set_balanced_order_book(mid_price=self.mid_price,
                                                   min_price=1,
                                                   max_price=200,
@@ -723,12 +941,12 @@ class PureMarketMakingV2UnitTest(unittest.TestCase):
         self.maker_market_2.set_balance("QETH", 500)
         self.maker_market_2.set_quantization_param(
             QuantizationParams(
-                self.maker_symbols[0], 6, 6, 6, 6
+                self.maker_trading_pairs[0], 6, 6, 6, 6
             )
         )
 
         self.market_info: MarketTradingPairTuple = MarketTradingPairTuple(
-            *([self.maker_market_2] + self.maker_symbols)
+            *([self.maker_market_2] + self.maker_trading_pairs)
         )
         logging_options: int = (PureMarketMakingStrategyV2.OPTION_LOG_ALL &
                                 (~PureMarketMakingStrategyV2.OPTION_LOG_NULL_ORDER_SIZE))
@@ -737,7 +955,7 @@ class PureMarketMakingV2UnitTest(unittest.TestCase):
             filter_delegate=self.filter_delegate,
             pricing_delegate=self.constant_pricing_delegate,
             sizing_delegate=self.constant_sizing_delegate,
-            jump_orders_enabled=True,
+            best_bid_ask_jump_mode=True,
             cancel_order_wait_time=900,
             filled_order_replenish_wait_time=80,
             enable_order_filled_stop_cancellation=True,
@@ -765,13 +983,13 @@ class PureMarketMakingV2InventorySkewUnitTest(unittest.TestCase):
     end: pd.Timestamp = pd.Timestamp("2019-01-01 01:00:00", tz="UTC")
     start_timestamp: float = start.timestamp()
     end_timestamp: float = end.timestamp()
-    maker_symbols: List[str] = ["COINALPHA-WETH", "COINALPHA", "WETH"]
+    maker_trading_pairs: List[str] = ["COINALPHA-WETH", "COINALPHA", "WETH"]
 
     def setUp(self):
         self.clock_tick_size = 1
         self.clock: Clock = Clock(ClockMode.BACKTEST, self.clock_tick_size, self.start_timestamp, self.end_timestamp)
         self.maker_market: BacktestMarket = BacktestMarket()
-        self.maker_data: MockOrderBookLoader = MockOrderBookLoader(*self.maker_symbols)
+        self.maker_data: MockOrderBookLoader = MockOrderBookLoader(*self.maker_trading_pairs)
         self.mid_price = 100
         self.bid_threshold = 0.01
         self.ask_threshold = 0.01
@@ -779,22 +997,23 @@ class PureMarketMakingV2InventorySkewUnitTest(unittest.TestCase):
         self.maker_data.set_balanced_order_book(mid_price=self.mid_price, min_price=1,
                                                 max_price=200, price_step_size=1, volume_step_size=10)
         self.filter_delegate = PassThroughFilterDelegate()
-        self.constant_pricing_delegate = ConstantSpreadPricingDelegate(self.bid_threshold, self.ask_threshold)
+        self.constant_pricing_delegate = ConstantSpreadPricingDelegate(Decimal(self.bid_threshold),
+                                                                       Decimal(self.ask_threshold))
         self.multiple_order_strategy_pricing_delegate = ConstantMultipleSpreadPricingDelegate(
-            bid_spread=self.bid_threshold,
-            ask_spread=self.ask_threshold,
-            order_interval_size=0.01,
+            bid_spread=Decimal(self.bid_threshold),
+            ask_spread=Decimal(self.ask_threshold),
+            order_interval_size=Decimal("0.01"),
             number_of_orders=5
         )
         self.inventory_skew_single_size_sizing_delegate = InventorySkewSingleSizeSizingDelegate(
             order_size=1,
-            inventory_target_base_percent=0.5
+            inventory_target_base_percent=Decimal("0.5")
         )
         self.inventory_skew_multiple_size_sizing_delegate = InventorySkewMultipleSizeSizingDelegate(
-            order_start_size=1.0,
-            order_step_size=0.5,
+            order_start_size=Decimal("1.0"),
+            order_step_size=Decimal("0.5"),
             number_of_orders=5,
-            inventory_target_base_percent=0.5
+            inventory_target_base_percent=Decimal("0.5")
         )
 
         self.maker_market.add_data(self.maker_data)
@@ -803,13 +1022,13 @@ class PureMarketMakingV2InventorySkewUnitTest(unittest.TestCase):
         self.maker_market.set_balance("QETH", 500)
         self.maker_market.set_quantization_param(
             QuantizationParams(
-                self.maker_symbols[0], 6, 6, 6, 6
+                self.maker_trading_pairs[0], 6, 6, 6, 6
             )
         )
 
         self.market_info: MarketTradingPairTuple = MarketTradingPairTuple(
             *(
-                [self.maker_market] + self.maker_symbols
+                [self.maker_market] + self.maker_trading_pairs
             )
         )
 
@@ -853,10 +1072,10 @@ class PureMarketMakingV2InventorySkewUnitTest(unittest.TestCase):
         self.maker_market.add_listener(MarketEvent.OrderCancelled, self.cancel_order_logger)
 
     def simulate_maker_market_trade(self, is_buy: bool, quantity: float):
-        maker_symbol: str = self.maker_symbols[0]
-        order_book: OrderBook = self.maker_market.get_order_book(maker_symbol)
+        maker_trading_pair: str = self.maker_trading_pairs[0]
+        order_book: OrderBook = self.maker_market.get_order_book(maker_trading_pair)
         trade_event: OrderBookTradeEvent = OrderBookTradeEvent(
-            maker_symbol,
+            maker_trading_pair,
             self.clock.current_timestamp,
             TradeType.BUY if is_buy else TradeType.SELL,
             (self.mid_price * (1 - self.bid_threshold - 0.01)

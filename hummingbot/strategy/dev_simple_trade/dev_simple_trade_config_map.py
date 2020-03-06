@@ -1,7 +1,7 @@
 from hummingbot.client.config.config_var import ConfigVar
 from hummingbot.client.config.config_validators import (
     is_exchange,
-    is_valid_market_symbol,
+    is_valid_market_trading_pair,
 )
 from hummingbot.client.settings import (
     required_exchanges,
@@ -9,10 +9,10 @@ from hummingbot.client.settings import (
 )
 
 
-def symbol_prompt():
+def trading_pair_prompt():
     market = dev_simple_trade_config_map.get("market").value
     example = EXAMPLE_PAIRS.get(market)
-    return "Enter the token symbol you would like to trade on %s%s >>> " \
+    return "Enter the token trading pair you would like to trade on %s%s >>> " \
            % (market, f" (e.g. {example})" if example else "")
 
 
@@ -20,10 +20,10 @@ def str2bool(value: str):
     return str(value).lower() in ("yes", "true", "t", "1")
 
 
-# checks if the symbol pair is valid
+# checks if the trading pair is valid
 def is_valid_market_trading_pair_tuple(value: str) -> bool:
     market = dev_simple_trade_config_map.get("market").value
-    return is_valid_market_symbol(market, value)
+    return is_valid_market_trading_pair(market, value)
 
 
 dev_simple_trade_config_map = {
@@ -34,7 +34,7 @@ dev_simple_trade_config_map = {
                   on_validated=lambda value: required_exchanges.append(value)),
     "market_trading_pair_tuple":
         ConfigVar(key="market_trading_pair_tuple",
-                  prompt=symbol_prompt,
+                  prompt=trading_pair_prompt,
                   validator=is_valid_market_trading_pair_tuple),
     "order_type":
         ConfigVar(key="order_type",
@@ -47,7 +47,7 @@ dev_simple_trade_config_map = {
                   prompt="What is your preferred quantity per order (denominated in the base asset, default is 1)? "
                          ">>> ",
                   default=1.0,
-                  type_str="float"),
+                  type_str="decimal"),
     "is_buy":
         ConfigVar(key="is_buy",
                   prompt="Enter True for Buy order and False for Sell order (default is Buy Order) >>> ",
@@ -63,7 +63,7 @@ dev_simple_trade_config_map = {
         ConfigVar(key="order_price",
                   prompt="What is the price of the limit order ? >>> ",
                   required_if=lambda: dev_simple_trade_config_map.get("order_type").value == "limit",
-                  type_str="float"),
+                  type_str="decimal"),
     "cancel_order_wait_time":
         ConfigVar(key="cancel_order_wait_time",
                   prompt="How long do you want to wait before cancelling your limit order (in seconds). "

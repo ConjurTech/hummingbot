@@ -2,6 +2,7 @@
 
 import asyncio
 import aiohttp
+from decimal import Decimal
 import logging
 import pandas as pd
 from typing import (
@@ -19,19 +20,21 @@ from websockets.exceptions import ConnectionClosed
 from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.market.radar_relay.radar_relay_order_book import RadarRelayOrderBook
 from hummingbot.market.radar_relay.radar_relay_active_order_tracker import RadarRelayActiveOrderTracker
+from hummingbot.market.radar_relay.radar_relay_order_book_message import RadarRelayOrderBookMessage
+from hummingbot.market.radar_relay.radar_relay_order_book_tracker_entry import RadarRelayOrderBookTrackerEntry
 from hummingbot.core.utils import async_ttl_cache
 from hummingbot.logger import HummingbotLogger
 from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
-from hummingbot.core.data_type.order_book_tracker_entry import OrderBookTrackerEntry, RadarRelayOrderBookTrackerEntry
-from hummingbot.core.data_type.order_book_message import OrderBookMessage, RadarRelayOrderBookMessage
+from hummingbot.core.data_type.order_book_tracker_entry import OrderBookTrackerEntry
+from hummingbot.core.data_type.order_book_message import OrderBookMessage
 from hummingbot.core.utils.exchange_rate_conversion import ExchangeRateConversion
 
 TRADING_PAIR_FILTER = re.compile(r"(WETH|DAI)$")
 
-REST_BASE_URL = "https://api.radarrelay.com/v2"
+REST_BASE_URL = "https://api.radarrelay.com/v3"
 TOKENS_URL = f"{REST_BASE_URL}/tokens"
 MARKETS_URL = f"{REST_BASE_URL}/markets"
-WS_URL = "wss://ws.radarrelay.com/v2"
+WS_URL = "wss://ws.radarrelay.com/v3"
 
 
 class RadarRelayAPIOrderBookDataSource(OrderBookTrackerDataSource):
@@ -48,9 +51,10 @@ class RadarRelayAPIOrderBookDataSource(OrderBookTrackerDataSource):
             cls._rraobds_logger = logging.getLogger(__name__)
         return cls._rraobds_logger
 
-    def __init__(self, symbols: Optional[List[str]] = None):
+    def __init__(self, trading_pairs: Optional[List[str]] = None):
         super().__init__()
-        self._symbols: Optional[List[str]] = symbols
+        self._trading_pairs: Optional[List[str]] = trading_pairs
+        self.order_book_create_function = lambda: RadarRelayOrderBook()
 
     @classmethod
     def http_client(cls) -> aiohttp.ClientSession:
@@ -77,7 +81,7 @@ class RadarRelayAPIOrderBookDataSource(OrderBookTrackerDataSource):
     @async_ttl_cache(ttl=60 * 30, maxsize=1)
     async def get_active_exchange_markets(cls) -> pd.DataFrame:
         """
-        Returned data frame should have symbol as index and include usd volume, baseAsset and quoteAsset
+        Returned data frame should have trading pair as index and include usd volume, baseAsset and quoteAsset
         """
         client: aiohttp.ClientSession = cls.http_client()
         async with client.get(f"{MARKETS_URL}?include=ticker,stats") as response:
@@ -91,8 +95,11 @@ class RadarRelayAPIOrderBookDataSource(OrderBookTrackerDataSource):
             ]
             all_markets: pd.DataFrame = pd.DataFrame.from_records(data=data, index="id")
 
-            weth_dai_price: float = float(all_markets.loc["WETH-DAI"]["ticker"]["price"])
-            dai_usd_price: float = ExchangeRateConversion.get_instance().adjust_token_rate("DAI", weth_dai_price)
+            weth_dai_price: Decimal = Decimal(ExchangeRateConversion.get_instance().convert_token_value(
+                1.0, from_currency="WETH", to_currency="DAI"
+            ))
+
+            dai_usd_price: float = float(ExchangeRateConversion.get_instance().adjust_token_rate("DAI", weth_dai_price))
             usd_volume: List[float] = []
             quote_volume: List[float] = []
             for row in all_markets.itertuples():
@@ -118,18 +125,18 @@ class RadarRelayAPIOrderBookDataSource(OrderBookTrackerDataSource):
             return await response.json()
 
     async def get_trading_pairs(self) -> List[str]:
-        if not self._symbols:
+        if not self._trading_pairs:
             try:
                 active_markets: pd.DataFrame = await self.get_active_exchange_markets()
-                self._symbols = active_markets.index.tolist()
+                self._trading_pairs = active_markets.index.tolist()
             except Exception:
-                self._symbols = []
+                self._trading_pairs = []
                 self.logger().network(
                     f"Error getting active exchange information.",
                     exc_info=True,
                     app_warning_msg=f"Error getting active exchange information. Check network connection."
                 )
-        return self._symbols
+        return self._trading_pairs
 
     async def get_tracking_pairs(self) -> Dict[str, OrderBookTrackerEntry]:
         # Get the currently active markets
@@ -145,7 +152,7 @@ class RadarRelayAPIOrderBookDataSource(OrderBookTrackerDataSource):
                     snapshot_msg: RadarRelayOrderBookMessage = RadarRelayOrderBook.snapshot_message_from_exchange(
                         snapshot,
                         snapshot_timestamp,
-                        metadata={"symbol": trading_pair}
+                        metadata={"trading_pair": trading_pair}
                     )
 
                     radar_relay_order_book: OrderBook = self.order_book_create_function()
@@ -235,7 +242,7 @@ class RadarRelayAPIOrderBookDataSource(OrderBookTrackerDataSource):
                         snapshot_msg: OrderBookMessage = RadarRelayOrderBook.snapshot_message_from_exchange(
                             snapshot,
                             snapshot_timestamp,
-                            metadata={"symbol": trading_pair}
+                            metadata={"trading_pair": trading_pair}
                         )
                         output.put_nowait(snapshot_msg)
                         self.logger().debug(f"Saved order book snapshot for {trading_pair}")

@@ -13,8 +13,10 @@ from hummingbot.core.clock import Clock, ClockMode
 from hummingbot.core.clock cimport Clock
 from hummingbot.logger import HummingbotLogger
 from hummingbot.core.event.events import (
-    WalletEvent
+    WalletEvent,
+    ZeroExEvent
 )
+from decimal import Decimal
 from hummingbot.wallet.ethereum.ethereum_chain import EthereumChain
 from hummingbot.core.event.event_listener cimport EventListener
 from hummingbot.core.network_iterator import NetworkStatus
@@ -94,6 +96,9 @@ cdef class Web3Wallet(WalletBase):
         self._transaction_failure_forwarder = Web3WalletBackendEventForwarder(
             self, WalletEvent.TransactionFailure.value
         )
+        self._zeroex_fill_forwarder = Web3WalletBackendEventForwarder(
+            self, ZeroExEvent.Fill.value
+        )
 
         # The check network operation can be done more frequently since it's only an indirect check.
         self.check_network_interval = 2.0
@@ -126,7 +131,7 @@ cdef class Web3Wallet(WalletBase):
     def current_backend(self) -> Web3WalletBackend:
         return self._best_backend
 
-    def get_all_balances(self) -> Dict[str, float]:
+    def get_all_balances(self) -> Dict[str, Decimal]:
         return self._best_backend.get_all_balances()
 
     def get_raw_balances(self) -> Dict[str, int]:
@@ -158,19 +163,19 @@ cdef class Web3Wallet(WalletBase):
     def approve_token_transfer(self, asset_name: str, spender_address: str, amount: float, **kwargs) -> str:
         return self._best_backend.approve_token_transfer(asset_name, spender_address, amount, **kwargs)
 
-    def wrap_eth(self, amount: float) -> str:
+    def wrap_eth(self, amount: Decimal) -> str:
         return self._best_backend.wrap_eth(amount)
 
-    def unwrap_eth(self, amount: float) -> str:
+    def unwrap_eth(self, amount: Decimal) -> str:
         return self._best_backend.unwrap_eth(amount)
 
     def execute_transaction(self, contract_function: ContractFunction, **kwargs) -> str:
         return self._best_backend.execute_transaction(contract_function, **kwargs)
 
-    def to_nominal(self, asset_name: str, raw_amount: int) -> float:
+    def to_nominal(self, asset_name: str, raw_amount: int) -> Decimal:
         return self._best_backend.to_nominal(asset_name, raw_amount)
 
-    def to_raw(self, asset_name: str, nominal_amount: float) -> int:
+    def to_raw(self, asset_name: str, nominal_amount: Decimal) -> int:
         return self._best_backend.to_raw(asset_name, nominal_amount)
 
     async def start_network(self):
@@ -182,7 +187,8 @@ cdef class Web3Wallet(WalletBase):
             self._token_approved_forwarder,
             self._eth_wrapped_forwarder,
             self._eth_unwrapped_forwarder,
-            self._transaction_failure_forwarder
+            self._transaction_failure_forwarder,
+            self._zeroex_fill_forwarder
         ]
         for backend, event_forwarder in itertools.product(self._wallet_backends, all_forwarders):
             event_tag = event_forwarder.event_tag
@@ -199,7 +205,8 @@ cdef class Web3Wallet(WalletBase):
             self._token_approved_forwarder,
             self._eth_wrapped_forwarder,
             self._eth_unwrapped_forwarder,
-            self._transaction_failure_forwarder
+            self._transaction_failure_forwarder,
+            self._zeroex_fill_forwarder
         ]
         for backend, event_forwarder in itertools.product(self._wallet_backends, all_forwarders):
             event_tag = event_forwarder.event_tag
@@ -236,10 +243,10 @@ cdef class Web3Wallet(WalletBase):
         for backend in self._wallet_backends:
             backend.stop()
 
-    cdef str c_send(self, str address, str asset_name, double amount):
+    cdef str c_send(self, str address, str asset_name, object amount):
         return self._best_backend.send(address, asset_name, amount)
 
-    cdef double c_get_balance(self, str asset_name) except? -1:
+    cdef object c_get_balance(self, str asset_name):
         return self._best_backend.get_balance(asset_name)
 
     cdef object c_get_raw_balance(self, str asset_name):

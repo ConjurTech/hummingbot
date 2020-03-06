@@ -11,6 +11,7 @@ from hummingbot.core.utils import async_ttl_cache
 from hummingbot.data_feed.data_feed_base import DataFeedBase
 from hummingbot.logger import HummingbotLogger
 from hummingbot.core.utils.async_utils import safe_ensure_future
+from hummingbot.data_feed.coin_cap_data_feed import CoinCapDataFeed
 
 
 class CoinGeckoDataFeed(DataFeedBase):
@@ -67,23 +68,33 @@ class CoinGeckoDataFeed(DataFeedBase):
             await asyncio.sleep(self._update_interval)
 
     @async_ttl_cache(ttl=60 * 60, maxsize=1)
-    async def fetch_supported_id_symbol_map(self) -> Dict[str, str]:
+    async def fetch_supported_id_asset_map(self) -> Dict[str, str]:
         """
-            Returns map of symbol to id, which is required for fetching price
+            Returns map of asset to id, which is required for fetching price
             Example: {"bitcoin": "BTC", "ethereum": "ETH", ...}
         """
         try:
             client: aiohttp.ClientSession = await self._http_client()
             async with client.request("GET", f"{self.BASE_URL}/coins/list") as resp:
                 assets: List[Dict[str, str]] = await resp.json()
-                return {asset["id"]: asset["symbol"].upper() for asset in assets}
+                asset_map: Dict[str, str] = {}
+                for asset in assets:
+                    # Make BUSD map to Binance Usd
+                    if asset['symbol'] == "busd" and asset['id'] != "binance-usd":
+                        continue
+                    # Make ONE map to Harmony
+                    if asset["symbol"] == "one" and asset["id"] != "harmony":
+                        continue
+                    asset_map[asset['id']] = asset['symbol'].upper()
+                return asset_map
         except Exception:
             raise
 
-    async def update_asset_prices(self, id_symbol_map: Dict[str, str]):
+    async def update_asset_prices(self, id_asset_map: Dict[str, str]):
         try:
-            all_ids: List[str] = list(id_symbol_map.keys())
-            ids_chunks: List[List[str]] = [all_ids[x:x + 500] for x in range(0, len(all_ids), 500)]
+            await CoinCapDataFeed.get_instance().get_ready()
+            all_ids = [k for k, v in id_asset_map.items() if v in CoinCapDataFeed.get_instance().price_dict.keys()]
+            ids_chunks: List[List[str]] = [all_ids[x:x + 70] for x in range(0, len(all_ids), 70)]
             client: aiohttp.ClientSession = await self._http_client()
             price_url: str = f"{self.BASE_URL}/simple/price"
             price_dict: Dict[str, float] = {}
@@ -94,12 +105,15 @@ class CoinGeckoDataFeed(DataFeedBase):
                 try:
                     async with client.request("GET", price_url, params=params) as resp:
                         results: Dict[str, Dict[str, float]] = await resp.json()
+                        if 'error' in results:
+                            raise Exception(f"{results['error']}")
                         for id, usd_price in results.items():
-                            symbol: str = id_symbol_map[id].upper()
+                            asset: str = id_asset_map[id].upper()
                             price: float = float(usd_price.get("usd", 0.0))
-                            price_dict[symbol] = price
-                except Exception:
-                    self.logger().warning("Coin Gecko API request failed. Unable to get prices.")
+                            price_dict[asset] = price
+                except Exception as e:
+                    self.logger().warning(f"Coin Gecko API request failed. Exception: {str(e)}")
+                    raise e
                 await asyncio.sleep(0.1)
 
             self._price_dict = price_dict
@@ -108,8 +122,8 @@ class CoinGeckoDataFeed(DataFeedBase):
 
     async def fetch_data(self):
         try:
-            id_symbol_map: Dict[str, str] = await self.fetch_supported_id_symbol_map()
-            await self.update_asset_prices(id_symbol_map)
+            id_asset_map: Dict[str, str] = await self.fetch_supported_id_asset_map()
+            await self.update_asset_prices(id_asset_map)
             self._ready_event.set()
         except Exception:
             raise

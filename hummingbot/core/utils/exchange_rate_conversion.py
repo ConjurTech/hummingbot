@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import math
+from decimal import Decimal
 from typing import (
     Dict,
     List,
@@ -11,10 +12,11 @@ from hummingbot.client.config.global_config_map import global_config_map
 from hummingbot.core.utils.async_utils import safe_ensure_future
 from hummingbot.data_feed.coin_cap_data_feed import CoinCapDataFeed
 from hummingbot.data_feed.coin_gecko_data_feed import CoinGeckoDataFeed
-from hummingbot.data_feed.data_feed_base import DataFeedBase
+from hummingbot.data_feed.data_feed_base import DataFeedBase, NetworkStatus
 from hummingbot.logger import HummingbotLogger
 
 NaN = float("nan")
+s_decimal_nan = Decimal("nan")
 
 
 class ExchangeRateConversion:
@@ -27,8 +29,8 @@ class ExchangeRateConversion:
     _data_feed_timeout: float = 30.0
     _data_feeds: List[DataFeedBase] = []
     _exchange_rate_config: Dict[str, Dict] = {"conversion_required": {}, "global_config": {}}
-    _exchange_rate: Dict[str, float] = {}
-    _all_data_feed_exchange_rate: Dict[str, Dict[str, float]] = {}
+    _exchange_rate: Dict[str, Decimal] = {}
+    _all_data_feed_exchange_rate: Dict[str, Dict[str, Decimal]] = {}
     _started: bool = False
     _ready_notifier: asyncio.Event = asyncio.Event()
     _show_update_exchange_rates_from_data_feeds_errors: bool = True
@@ -91,11 +93,11 @@ class ExchangeRateConversion:
             # Set default rate and source for token rates globally
             fetcher_global_config: List[List[str, str]] = global_config_map["exchange_rate_fetcher"].value or []
             # Set rate and source for tokens that needs conversion, overwrites global config
-            rate_conversion_config: List[List[str, str, str]] = global_config_map[
-                                                                    "exchange_rate_conversion"].value or []
+            rate_conversion_config: List[List[str, str, str]] = global_config_map["exchange_rate_conversion"].value or []
             if cls._exchange_rate_config_override is None:
-                conversion_required = {e[0]: {"default": e[1], "source": e[2]} for e in rate_conversion_config}
-                global_config = {e[0]: {"default": NaN, "source": e[1]} for e in fetcher_global_config}
+                conversion_required = {e[0]: {"default": e[1], "source": e[2]}
+                                       for e in rate_conversion_config}
+                global_config = {e[0]: {"default": s_decimal_nan, "source": e[1]} for e in fetcher_global_config}
             else:
                 conversion_required = cls._exchange_rate_config_override.get("conversion_required", {})
                 global_config = cls._exchange_rate_config_override.get("global_config", {})
@@ -108,7 +110,8 @@ class ExchangeRateConversion:
                 "conversion_required": conversion_required,
                 "global_config": {**global_config, **conversion_required}
             }
-            cls._exchange_rate = {k: v["default"] for k, v in cls._exchange_rate_config["global_config"].items()}
+            cls._exchange_rate = {k: v["default"]
+                                  for k, v in cls._exchange_rate_config["global_config"].items()}
 
         except Exception:
             cls.logger().error("Error initiating config for exchange rate conversion.", exc_info=True)
@@ -121,7 +124,7 @@ class ExchangeRateConversion:
     def exchange_rate(self) -> Dict[str, float]:
         return self._exchange_rate.copy()
 
-    def get_exchange_rate(self, source: str = None):
+    def get_exchange_rate(self, source: str = None) -> Dict[str, float]:
         if source == "default":
             if self._default_data_feed not in self.all_exchange_rate:
                 self.logger().error(f"{self._default_data_feed} is not in one of the data feeds: "
@@ -132,11 +135,11 @@ class ExchangeRateConversion:
         elif source in self.all_exchange_rate.keys():
             return self.all_exchange_rate[source]
 
-        elif source == "config" or source is None:
+        elif source == "config":
             return self.exchange_rate
 
-        elif source == "any":
-            _exchange_rate = {}
+        elif source == "any" or source is None:
+            _exchange_rate = self.exchange_rate.copy()
             for d in self.all_exchange_rate.values():
                 for k, v in d.items():
                     _exchange_rate[k] = v
@@ -148,7 +151,7 @@ class ExchangeRateConversion:
         self._fetch_exchange_rate_task: Optional[asyncio.Task] = None
         self.init_config()
 
-    def adjust_token_rate(self, asset_name: str, price: float, source: str = None) -> float:
+    def adjust_token_rate(self, asset_name: str, price: Decimal) -> Decimal:
         """
         Returns the USD rate of a given token if it is found in conversion_required config
         :param source:
@@ -156,16 +159,29 @@ class ExchangeRateConversion:
         :param price:
         :return:
         """
+        if price == s_decimal_nan:
+            return price
         asset_name = asset_name.upper()
         if not self._started:
             self.start()
-        exchange_rate = self.get_exchange_rate(source)
+        exchange_rate = self.get_exchange_rate("config")
         if asset_name in self._exchange_rate_config["conversion_required"] and asset_name in self._exchange_rate:
-            return exchange_rate[asset_name] * price
+            return Decimal(repr(exchange_rate[asset_name])) * price
         else:
-            return price
+            return Decimal(price)
 
-    def convert_token_value(self, amount: float, from_currency: str, to_currency: str, source: str = None):
+    def convert_token_value_decimal(self,
+                                    amount: Decimal,
+                                    from_currency: str,
+                                    to_currency: str,
+                                    source: str = None) -> Decimal:
+        return Decimal(repr(self.convert_token_value(float(amount), from_currency, to_currency, source)))
+
+    def convert_token_value(self,
+                            amount: float,
+                            from_currency: str,
+                            to_currency: str,
+                            source: str = None) -> float:
         """
         Converts a token amount to the amount of another token with equivalent worth
         :param source:
@@ -176,16 +192,15 @@ class ExchangeRateConversion:
         """
         if not self._started:
             self.start()
-
         exchange_rate = self.get_exchange_rate(source)
-
         from_currency = from_currency.upper()
         to_currency = to_currency.upper()
         # assume WETH and ETH are equal value
-        if from_currency == "ETH" and to_currency == "WETH" or from_currency == "WETH" and to_currency == "ETH":
+        if from_currency == "ETH" and to_currency == "WETH" or from_currency == "WETH" and to_currency == "ETH" \
+                or from_currency == to_currency:
             return amount
-        from_currency_usd_rate = exchange_rate.get(from_currency, NaN)
-        to_currency_usd_rate = exchange_rate.get(to_currency, NaN)
+        from_currency_usd_rate = exchange_rate.get(from_currency.upper(), NaN)
+        to_currency_usd_rate = exchange_rate.get(to_currency.upper(), NaN)
         if math.isnan(from_currency_usd_rate) or math.isnan(to_currency_usd_rate):
             raise ValueError(f"Unable to convert '{from_currency}' to '{to_currency}'. Aborting.")
         return amount * from_currency_usd_rate / to_currency_usd_rate
@@ -219,19 +234,23 @@ class ExchangeRateConversion:
             self.logger().warning(f"Error getting data from {source_name} data feed.", exc_info=True)
             raise
 
-    async def wait_till_ready(self):
+    async def wait_for_data_feeds(self):
         for data_feed in self._data_feeds:
             try:
+                self.logger().debug(f"Waiting for {data_feed.name} to get ready.")
                 await asyncio.wait_for(data_feed.get_ready(), timeout=self._data_feed_timeout)
             except asyncio.TimeoutError:
                 if self._show_wait_till_ready_errors:
                     self.logger().warning(f"Error initializing data feed - {data_feed.name}.")
                     self._show_wait_till_ready_errors = False
 
+    async def wait_till_ready(self):
+        await self._ready_notifier.wait()
+
     async def request_loop(self):
         while True:
             try:
-                await self.wait_till_ready()
+                await self.wait_for_data_feeds()
                 await self.update_exchange_rates_from_data_feeds()
                 self._ready_notifier.set()
             except asyncio.CancelledError:
@@ -255,3 +274,8 @@ class ExchangeRateConversion:
         if self._fetch_exchange_rate_task and not self._fetch_exchange_rate_task.done():
             self._fetch_exchange_rate_task.cancel()
         self._started = False
+        self._ready_notifier.clear()
+
+    @property
+    def ready(self) -> bool:
+        return all(df.network_status == NetworkStatus.CONNECTED for df in self._data_feeds)

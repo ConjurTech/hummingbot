@@ -51,9 +51,9 @@ cdef class PerformTradeStrategy(StrategyBase):
     def __init__(self,
                  market_infos: List[MarketTradingPairTuple],
                  order_type: str = "limit",
-                 order_price: Optional[float] = None,
+                 order_price: Optional[Decimal] = None,
                  is_buy: bool = True,
-                 order_amount: float = 1.0,
+                 order_amount: Decimal = Decimal(1),
                  logging_options: int = OPTION_LOG_ALL,
                  status_report_interval: float = 900):
 
@@ -113,13 +113,6 @@ cdef class PerformTradeStrategy(StrategyBase):
 
     def format_status(self) -> str:
         cdef:
-            MarketBase maker_market
-            OrderBook maker_order_book
-            str maker_symbol
-            str maker_base
-            str maker_quote
-            double maker_base_balance
-            double maker_quote_balance
             list lines = []
             list warning_lines = []
             dict market_info_to_active_orders = self.market_info_to_active_orders
@@ -222,10 +215,10 @@ cdef class PerformTradeStrategy(StrategyBase):
     cdef c_has_enough_balance(self, object market_info):
         cdef:
             MarketBase market = market_info.market
-            object base_asset_balance = Decimal(market.c_get_balance(market_info.base_asset))
-            object quote_asset_balance = Decimal(market.c_get_balance(market_info.quote_asset))
+            object base_asset_balance = market.c_get_balance(market_info.base_asset)
+            object quote_asset_balance = market.c_get_balance(market_info.quote_asset)
             OrderBook order_book = market_info.order_book
-            object price = Decimal(order_book.c_get_price_for_volume(True, float(self._order_amount)).result_price)
+            object price = market_info.get_price_for_volume(True, self._order_amount).result_price
 
         return quote_asset_balance >= self._order_amount * price if self._is_buy else base_asset_balance >= self._order_amount
 

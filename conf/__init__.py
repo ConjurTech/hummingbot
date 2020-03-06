@@ -34,6 +34,9 @@ order_books_db_2 = {
 
 kafka_bootstrap_server = "***REMOVED***"
 
+# whether to enable api mocking in unit test cases
+mock_api_enabled = os.getenv("MOCK_API_ENABLED")
+
 # Binance Tests
 binance_api_key = os.getenv("BINANCE_API_KEY")
 binance_api_secret = os.getenv("BINANCE_API_SECRET")
@@ -43,17 +46,37 @@ coinbase_pro_api_key = os.getenv("COINBASE_PRO_API_KEY")
 coinbase_pro_secret_key = os.getenv("COINBASE_PRO_SECRET_KEY")
 coinbase_pro_passphrase = os.getenv("COINBASE_PRO_PASSPHRASE")
 
-# IDEX Tests
-idex_api_key = os.getenv("IDEX_API_KEY")
-test_idex_erc20_token_address_1 = os.getenv("IDEX_TOKEN_ADDRESS_1")
-test_idex_erc20_token_address_2 = os.getenv("IDEX_TOKEN_ADDRESS_2")
-web3_test_private_key_idex = os.getenv("IDEX_WALLET_PRIVATE_KEY")
 
 # Huobi Tests
 huobi_api_key = os.getenv("HUOBI_API_KEY")
 huobi_secret_key = os.getenv("HUOBI_SECRET_KEY")
 
+# Dolomite Tests
+dolomite_test_web3_private_key = os.getenv("DOLOMITE_TEST_PK")
+dolomite_test_web3_address = os.getenv("DOLOMITE_TEST_ADDR")
+
+# Bittrex Tests
+bittrex_api_key = os.getenv("BITTREX_API_KEY")
+bittrex_secret_key = os.getenv("BITTREX_SECRET_KEY")
+
+# Bitfinex
+bitfinex_api_key = os.getenv("BITFINEX_API_KEY")
+bitfinex_secret_key = os.getenv("BITFINEX_SECRET_KEY")
+
+# KuCoin Tests
+kucoin_api_key = os.getenv("KUCOIN_API_KEY")
+kucoin_secret_key = os.getenv("KUCOIN_SECRET_KEY")
+kucoin_passphrase = os.getenv("KUCOIN_PASSPHRASE")
+
+# Bitcoin_com Tests
+bitcoin_com_api_key = os.getenv("BITCOIN_COM_API_KEY")
+bitcoin_com_secret_key = os.getenv("BITCOIN_COM_SECRET_KEY")
+
 test_web3_provider_list = [os.getenv("WEB3_PROVIDER")]
+
+# Liquid Tests
+liquid_api_key = os.getenv("LIQUID_API_KEY")
+liquid_secret_key = os.getenv("LIQUID_SECRET_KEY")
 
 # Wallet Tests
 test_erc20_token_address = os.getenv("TEST_ERC20_TOKEN_ADDRESS")

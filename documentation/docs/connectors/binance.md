@@ -8,6 +8,16 @@ Binance is a global cryptocurrency exchange that provides a platform for trading
 
 Because Binance is a centralized exchange, you will need to generate and provide your API key in order to trade using Hummingbot.
 
+```
+Enter your Binance API key >>>
+Enter your Binance secret key >>>
+```
+
+Private keys and API keys are stored locally for the operation of the Hummingbot client only. At no point will private or API keys be shared to CoinAlpha or be used in any way other than to authorize transactions required for the operation of Hummingbot.
+
+!!! tip "Copying and pasting into Hummingbot"
+    See [this page](https://docs.hummingbot.io/support/how-to/#paste-items-from-clipboard-in-putty) for more instructions in our Get Help section.
+
 ### Creating Binance API Keys
 
 1 - Log into your account at https://www.binance.com, then select **Account** (If you do not have an account, you will have to create one and verify your ID).
@@ -47,6 +57,6 @@ Make sure you store your Secret Key somewhere secure, and do not share it with a
 
 See [this page](https://www.binance.com/en/trade-rule) for the minimum order size per trading pair. Typically, the minimum is around $10 equivalent of whichever currency you are trading in.
 
-## Transaction Fees
+### Transaction Fees
 
 By default, trading fees are 0.1% on Binance for both market makers and takers. However, users who trade high volumes and own substantial amounts of Binance Coin can receive discounts. More details can be found [here](https://www.binance.com/en/support/articles/115000429332-Fee-Structure-on-Binance).

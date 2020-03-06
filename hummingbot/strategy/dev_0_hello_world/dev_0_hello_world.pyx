@@ -12,6 +12,7 @@ from hummingbot.core.clock cimport Clock
 from hummingbot.logger import HummingbotLogger
 from hummingbot.core.data_type.limit_order cimport LimitOrder
 from hummingbot.core.data_type.limit_order import LimitOrder
+from libc.stdint cimport int64_t
 from hummingbot.core.data_type.order_book cimport OrderBook
 from hummingbot.market.market_base import MarketBase
 from hummingbot.market.market_base cimport MarketBase
@@ -43,7 +44,7 @@ cdef class HelloWorldStrategy(StrategyBase):
 
     def __init__(self,
                  market_infos: List[MarketTradingPairTuple],
-                 asset_symbol: str,
+                 asset_trading_pair: str,
                  logging_options: int = OPTION_LOG_ALL,
                  status_report_interval: float = 900):
 
@@ -56,7 +57,7 @@ cdef class HelloWorldStrategy(StrategyBase):
             for market_info in market_infos
         }
 
-        self._asset_symbol = asset_symbol
+        self._asset_trading_pair = asset_trading_pair
         self._all_markets_ready = False
         self._logging_options = logging_options
         self._status_report_interval = status_report_interval
@@ -100,13 +101,6 @@ cdef class HelloWorldStrategy(StrategyBase):
 
     def format_status(self) -> str:
         cdef:
-            MarketBase maker_market
-            OrderBook maker_order_book
-            str maker_symbol
-            str maker_base
-            str maker_quote
-            double maker_base_balance
-            double maker_quote_balance
             list lines = []
             list warning_lines = []
 
@@ -115,8 +109,8 @@ cdef class HelloWorldStrategy(StrategyBase):
 
             warning_lines.extend(self.network_warning([market_info]))
 
-            lines.extend(["", "  Assets:"] + ["    " + str(self._asset_symbol) + "    " +
-                         str((market_info.market).get_balance(self._asset_symbol))])
+            lines.extend(["", "  Assets:"] + ["    " + str(self._asset_trading_pair) + "    " +
+                                              str(market_info.market.get_balance(self._asset_trading_pair))])
 
             warning_lines.extend(self.balance_warning([market_info]))
 

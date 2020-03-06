@@ -26,31 +26,6 @@ Open a Terminal window and go to the root of the directory that contains Humming
 bin/hummingbot.py
 ```
 
-### Trading Strategy Autostart
-
-Hummingbot can automatically start the execution of a previously configured trading strategy upon launch without requiring the Hummingbot interface `config` and `start` commands.  Any parameters that are required for `config` can be passed into the Hummingbot launch command.
-
-**Launch command**
-
-```bash tab="Docker command"
-docker run -it \
--e STRATEGY=${STRATEGY} \
--e CONFIG_FILE_NAME=${CONFIG_FILENAME} \
--e WALLET=${WALLET} \
--e WALLET_PASSWORD=${WALLET_PASSWORD} \
---name hummingbot-instance \
---mount "type=bind,source=$(pwd)/hummingbot_files/hummingbot_conf,destination=/conf/" \
---mount "type=bind,source=$(pwd)/hummingbot_files/hummingbot_logs,destination=/logs/" \
-coinalpha/hummingbot:latest
-```
-
-```bash tab="Installed from source"
-bin/hummingbot_quickstart.py \
---strategy ${STRATEGY} \
---config-file-name ${CONFIG_FILENAME} \
---wallet ${WALLET} \
---wallet-password ${WALLET-PASSWORD}
-```
 
 ## User Interface
 
@@ -80,17 +55,6 @@ The CLI is divided into three panes:
 | `start` | Starts the bot. If any configuration settings are missing, it will automatically prompt you for them.
 | `status` | Get a status report about the current bot status.
 | `stop` | Cancels all outstanding orders and stops the bot.
-
-
-## Bounty-Related Commands
-
-| Command | Description |
-|-------- | ----------- |
-| `bounty --register` | Register to participate in for liquidity bounties.
-| `bounty --list` | See a list of active bounties.
-| `bounty --restore-id` | If you lost your configuration file, this is the command to restore it.
-| `bounty --status` | See your accumulated rewards.
-| `bounty --terms` | See the terms & conditions.
 
 ## Keyboard shortcuts
 | Keyboard Combo | Command | Description |

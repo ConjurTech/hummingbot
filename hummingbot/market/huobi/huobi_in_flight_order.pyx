@@ -17,7 +17,7 @@ cdef class HuobiInFlightOrder(InFlightOrderBase):
     def __init__(self,
                  client_order_id: str,
                  exchange_order_id: str,
-                 symbol: str,
+                 trading_pair: str,
                  order_type: OrderType,
                  trade_type: TradeType,
                  price: Decimal,
@@ -27,7 +27,7 @@ cdef class HuobiInFlightOrder(InFlightOrderBase):
             HuobiMarket,
             client_order_id,
             exchange_order_id,
-            symbol,
+            trading_pair,
             order_type,
             trade_type,
             price,
@@ -38,6 +38,10 @@ cdef class HuobiInFlightOrder(InFlightOrderBase):
     @property
     def is_done(self) -> bool:
         return self.last_state in {"filled", "canceled", "partial-canceled"}
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self.last_state in {"partial-canceled", "canceled"}
 
     @property
     def is_failure(self) -> bool:
@@ -53,7 +57,7 @@ cdef class HuobiInFlightOrder(InFlightOrderBase):
             HuobiInFlightOrder retval = HuobiInFlightOrder(
                 client_order_id=data["client_order_id"],
                 exchange_order_id=data["exchange_order_id"],
-                symbol=data["symbol"],
+                trading_pair=data["trading_pair"],
                 order_type=getattr(OrderType, data["order_type"]),
                 trade_type=getattr(TradeType, data["trade_type"]),
                 price=Decimal(data["price"]),

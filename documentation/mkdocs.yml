@@ -10,7 +10,7 @@ repo_url: 'https://github.com/coinalpha/hummingbot'
 edit_uri: 'blob/master/documentation/docs/'
 
 # Copyright
-copyright: 'Copyright &copy; 2019 CoinAlpha, Inc.'
+copyright: 'Copyright &copy; 2020 CoinAlpha, Inc.'
 
 # Configuration
 theme:
@@ -90,13 +90,14 @@ nav:
         - Source Commands: cheatsheets/source.md
         - Client Commands: cheatsheets/client.md
       - Bounties:
-        - Liquidity Bounties FAQ: bounties/faq.md
-        - Active Bounties:
-          - Harmony $ONE Makers: bounties/active/harmony.md
         - Bug Bounty Program: support/bug-bounty-program.md
+        - Developer Bounty Program: bounties/developer-bounty.md
       - Get Help:
-        - FAQ: support/faq.md
-        - Troubleshooting: support/troubleshooting.md
+        - Frequently Asked Questions: support/faq.md
+        - Troubleshooting:
+          - General: support/troubleshooting/general.md
+          - Binance Errors: support/troubleshooting/binance.md
+          - Dolomite Errors: support/troubleshooting/dolomite.md
         - Common 'How To' Questions: support/how-to.md
         - Contact and Support: support/index.md
         - 中文 Github repo: https://github.com/coinalpha/hummingbot_chinese
@@ -105,34 +106,40 @@ nav:
       - Installation:
         - Installation Overview: installation/index.md
         - Setup a Cloud Server: installation/cloud.md
+        - Install via Binary:
+          - Windows: installation/from-binary/windows.md
+          - macOS: installation/from-binary/macos.md
         - Install via Docker:
           - Linux: installation/via-docker/linux.md
-          - MacOS: installation/via-docker/macOS.md
+          - macOS: installation/via-docker/macOS.md
           - Windows: installation/via-docker/windows.md
         - Install from Source:
           - Linux: installation/from-source/linux.md
-          - MacOS: installation/from-source/macOS.md
+          - macOS: installation/from-source/macOS.md
           - Windows: installation/from-source/windows.md
         - Updating Hummingbot: installation/updating.md
       - Operation:
         - Using the Client: operation/client.md
         - Running Trading Bots: operation/running-bots.md
+        - Trading Strategy Autostart: operation/autostart.md
         - Running Multiple Bots: operation/running-multiple-bots.md
       - Configuration:
         - Configuring Hummingbot: operation/configuration.md
         - API Keys: installation/api-keys.md
         - Ethereum Wallet: installation/wallet.md
-        - Ethereum Node: installation/node/node.md
+        - Ethereum Node: installation/node/index.md
         - Get a Free Ethereum Node: installation/node/infura.md
       - Connectors:
         - Connectors Overview: connectors/index.md
         - Binance: connectors/binance.md
         - Coinbase Pro: connectors/coinbase.md
         - Huobi Global: connectors/huobi.md
-        - DDEX: connectors/ddex.md
-        - IDEX: connectors/idex.md
+        - Bittrex Global: connectors/bittrex.md
+        - Liquid: connectors/liquid.md
+        - KuCoin: connectors/kucoin.md
         - Radar Relay: connectors/radar-relay.md
         - Bamboo Relay: connectors/bamboo-relay.md
+        - Dolomite: connectors/dolomite.md
         - 0x Relayers: connectors/0x.md
       - Strategies:
         - Strategies Overview: strategies/index.md
@@ -140,31 +147,80 @@ nav:
         - Cross-Exchange Market Making: strategies/cross-exchange-market-making.md
         - Pure Market Making: strategies/pure-market-making.md
         - Discovery: strategies/discovery.md
-        - Simple Trade: strategies/simple-trade.md
       - Data Feeds:
         - Data Feeds Overview: feeds.md
       - Utilities:
+        - Performance Analysis: utilities/performance-analysis.md
         - Paper Trading Mode: utilities/paper-trade.md
         - Kill Switch: utilities/kill-switch.md
         - Logs and Logging: utilities/logging.md
         - Using Exchange Rates: utilities/exchange-rates.md
         - Integrating Telegram: utilities/telegram.md
+    - Liquidity Mining:
+      - Overview: liquidity-mining/index.md
+      - FAQ: liquidity-mining/faq.md
+      - Liquidity Mining Guide:
+        - Intro: liquidity-mining/guide/index.md
+        - 1. Sign up: liquidity-mining/guide/1-sign-up.md
+        - 2. Connect exchanges: liquidity-mining/guide/2-connect-exchanges.md
+        - 3. Run Hummingbot: liquidity-mining/guide/3-run-bot.md
+        - 4. Track earnings: liquidity-mining/guide/4-track-earnings.md
+      - Liquidity Mining Campaigns:
+        - Active: liquidity-mining/campaigns/index.md
+        - List of Sponsors: liquidity-mining/campaigns/sponsors.md
     - Developer Manual:
         - Intro: developers/index.md
+        - Getting Started:
+          - Intro: developers/gettingstarted/index.md
+          - Linux:
+            - Intro: developers/gettingstarted/linux/index.md
+            - 1. Installing Hummingbot: developers/gettingstarted/linux/1-installing.md
+            - 2. Using Hummingbot: developers/gettingstarted/linux/2-using.md
+            - 3. Re-compiling Hummingbot: developers/gettingstarted/linux/3-recompiling.md
+          - macOS:
+            - Intro: developers/gettingstarted/mac/index.md
+            - 1. Installing Prerequisites: developers/gettingstarted/mac/1-prereqs.md
+            - 2. Installing Hummingbot: developers/gettingstarted/mac/2-installing.md
+            - 3. Using Hummingbot: developers/gettingstarted/mac/3-using.md
+            - 4. Re-compiling Hummingbot: developers/gettingstarted/mac/4-recompiling.md
+          - Windows:
+            - Intro: developers/gettingstarted/windows/index.md
+            - 1. Installing Hummingbot: developers/gettingstarted/windows/1-installing.md
+            - 2. Using Hummingbot: developers/gettingstarted/windows/2-using.md
+            - 3. Re-compiling Hummingbot: developers/gettingstarted/windows/3-recompiling.md
         - Strategies:
           - Architecture: developers/strategies/index.md
           - Arbitrage: developers/strategies/arbitrage.md
           - Cross-Exchange Market Making: developers/strategies/cross-exchange-market-making.md
           - Pure Market Making: developers/strategies/pure-market-making.md
           - Discovery: developers/strategies/discovery.md
+          - TWAP: developers/strategies/twap.md
         - Connectors:
-          - Adding Connectors: developers/connectors/index.md
-          - Adding Connectors to Other Blockchains: developers/connectors/new-blockchain.md
+          - Intro: developers/connectors/index.md
+          - Architecture: developers/connectors/architecture.md
           - Order Lifecycle: developers/connectors/order-lifecycle.md
+          - Building Connectors: developers/connectors/tutorial.md
+          - Miscellaneous: developers/connectors/miscellaneous.md
+        - Tutorial (WIP):
+          - Intro: developers/tutorial/index.md
+          - Perform Trade: developers/tutorial/perform-trade.md
+          - Simple Trade: developers/tutorial/simple-trade.md
         - Debug Console: developers/debug.md
         - Configuration: developers/config.md
     - Release Notes:
       - About Releases: release-notes/index.md
+      - 0.24.1: release-notes/0.24.1.md
+      - 0.24.0: release-notes/0.24.0.md
+      - 0.23.0: release-notes/0.23.0.md
+      - 0.22.0: release-notes/0.22.0.md
+      - 0.21.0: release-notes/0.21.0.md
+      - 0.20.0: release-notes/0.20.0.md
+      - 0.19.1: release-notes/0.19.1.md
+      - 0.19.0: release-notes/0.19.0.md
+      - 0.18.1: release-notes/0.18.1.md
+      - 0.18.0: release-notes/0.18.0.md
+      - 0.17.1: release-notes/0.17.1.md
+      - 0.17.0: release-notes/0.17.0.md
       - 0.16.0: release-notes/0.16.0.md
       - 0.15.0: release-notes/0.15.0.md
       - 0.14.0: release-notes/0.14.0.md

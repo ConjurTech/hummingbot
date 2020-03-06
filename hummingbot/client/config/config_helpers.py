@@ -1,5 +1,8 @@
 import logging
+from decimal import Decimal
+
 import ruamel.yaml
+from os import unlink
 from os.path import (
     join,
     isfile,
@@ -18,17 +21,22 @@ import shutil
 
 from hummingbot.client.config.config_var import ConfigVar
 from hummingbot.client.config.global_config_map import global_config_map
-from hummingbot.client.liquidity_bounty.liquidity_bounty_config_map import liquidity_bounty_config_map
+from hummingbot.client.config.fee_overrides_config_map import fee_overrides_config_map
 from hummingbot.client.settings import (
     GLOBAL_CONFIG_PATH,
+    TRADE_FEES_CONFIG_PATH,
     TEMPLATE_PATH,
     CONF_FILE_PATH,
     CONF_POSTFIX,
     CONF_PREFIX,
-    LIQUIDITY_BOUNTY_CONFIG_PATH,
-    DEPRECATED_CONFIG_VALUES,
     TOKEN_ADDRESSES_FILE_PATH,
 )
+from hummingbot.core.utils.async_utils import safe_ensure_future
+from hummingbot.client.config.config_crypt import (
+    encrypt_n_save_config_value,
+    encrypted_config_file_exists
+)
+from hummingbot.core.utils.exchange_rate_conversion import ExchangeRateConversion
 
 # Use ruamel.yaml to preserve order and comments in .yml file
 yaml_parser = ruamel.yaml.YAML()
@@ -54,7 +62,7 @@ def parse_cvar_value(cvar: ConfigVar, value: Any) -> Any:
             return [s.strip() for s in value]  # remove leading and trailing whitespaces
         else:
             return value
-    elif cvar.type == 'dict':
+    elif cvar.type == 'json':
         if isinstance(value, str):
             value_json = value.replace("'", '"')  # replace single quotes with double quotes for valid JSON
             return json.loads(value_json)
@@ -64,23 +72,47 @@ def parse_cvar_value(cvar: ConfigVar, value: Any) -> Any:
         try:
             return float(value)
         except Exception:
-            logging.getLogger().error(f"\"{value}\" is not an integer.")
-            return 0.0
+            logging.getLogger().error(f"\"{value}\" is not valid float.", exc_info=True)
+            return value
+    elif cvar.type == 'decimal':
+        try:
+            return Decimal(str(value))
+        except Exception:
+            logging.getLogger().error(f"\"{value}\" is not valid decimal.", exc_info=True)
+            return value
     elif cvar.type == 'int':
         try:
             return int(value)
         except Exception:
-            logging.getLogger().error(f"\"{value}\" is not an integer.")
-            return 0
+            logging.getLogger().error(f"\"{value}\" is not an integer.", exc_info=True)
+            return value
     elif cvar.type == 'bool':
         if isinstance(value, str) and value.lower() in ["true", "yes", "y"]:
             return True
         elif isinstance(value, str) and value.lower() in ["false", "no", "n"]:
             return False
         else:
-            return bool(value)
+            return value
     else:
         raise TypeError
+
+
+def parse_cvar_default_value_prompt(cvar: ConfigVar) -> str:
+    """
+    :param cvar: ConfigVar object
+    :return: text for default value prompt
+    """
+    if cvar.default is None:
+        default = ""
+    elif callable(cvar.default):
+        default = cvar.default()
+    elif cvar.type == 'bool' and isinstance(cvar.prompt, str) and "Yes/No" in cvar.prompt:
+        default = "Yes" if cvar.default else "No"
+    else:
+        default = str(cvar.default)
+    if isinstance(default, Decimal):
+        default = "{0:.4f}".format(default)
+    return default
 
 
 async def copy_strategy_template(strategy: str) -> str:
@@ -108,11 +140,15 @@ def get_strategy_template_path(strategy: str) -> str:
     return join(TEMPLATE_PATH, f"{CONF_PREFIX}{strategy}{CONF_POSTFIX}_TEMPLATE.yml")
 
 
-def get_erc20_token_addresses(symbols: List[str]):
+def get_erc20_token_addresses(trading_pairs: List[str]):
+
     with open(TOKEN_ADDRESSES_FILE_PATH) as f:
         try:
-            data = json.load(f)
-            addresses = [data[symbol] for symbol in symbols if symbol in data]
+            data: Dict[str, str] = json.load(f)
+            overrides: Dict[str, str] = global_config_map.get("ethereum_token_overrides").value
+            if overrides is not None:
+                data.update(overrides)
+            addresses = [data[trading_pair] for trading_pair in trading_pairs if trading_pair in data]
             return addresses
         except Exception as e:
             logging.getLogger().error(e, exc_info=True)
@@ -175,43 +211,67 @@ def load_required_configs(*args) -> OrderedDict:
         return _merge_dicts(in_memory_config_map, strategy_config_map, global_config_map)
 
 
-def read_configs_from_yml(strategy_file_path: str = None):
+def read_configs_from_yml(strategy_file_path: Optional[str] = None):
     """
     Read global config and selected strategy yml files and save the values to corresponding config map
+    If a yml file is outdated, it gets reformatted with the new template
     """
     from hummingbot.client.config.in_memory_config_map import in_memory_config_map
     current_strategy = in_memory_config_map.get("strategy").value
-    strategy_config_map = get_strategy_config_map(current_strategy)
+    strategy_config_map: Optional[Dict[str, ConfigVar]] = get_strategy_config_map(current_strategy)
 
-    def load_yml_into_cm(yml_path: str, cm: Dict[str, ConfigVar]):
+    def load_yml_into_cm(yml_path: str, template_file_path: str, cm: Dict[str, ConfigVar]):
         try:
             with open(yml_path) as stream:
                 data = yaml_parser.load(stream) or {}
-                for key in data:
-                    if current_strategy == "cross_exchange_market_making" and key == "trade_size_override":
-                        logging.getLogger(__name__).error("Cross Exchange Strategy cannot be run with old config "
-                                                          "file due to changes in strategy. "
-                                                          "Please create a new config file.")
-                    if key == "wallet":
-                        continue
-                    if key in DEPRECATED_CONFIG_VALUES:
-                        continue
-                    cvar = cm.get(key)
-                    val_in_file = data.get(key)
-                    if cvar is None:
-                        logging.getLogger().warning(f"Cannot find corresponding config to key {key}.")
-                        continue
-                    cvar.value = val_in_file
-                    if val_in_file is not None and not cvar.validate(val_in_file):
-                        raise ValueError("Invalid value %s for config variable %s" % (val_in_file, cvar.key))
+                conf_version = data.get("template_version", 0)
+
+            with open(template_file_path, "r") as template_fd:
+                template_data = yaml_parser.load(template_fd)
+                template_version = template_data.get("template_version", 0)
+
+            for key in template_data:
+                if key in {"wallet", "template_version"}:
+                    continue
+
+                cvar = cm.get(key)
+                if cvar is None:
+                    logging.getLogger().error(f"Cannot find corresponding config to key {key} in template.")
+                    continue
+
+                # Skip this step since the values are not saved in the yml file
+                if cvar.is_secure:
+                    continue
+
+                val_in_file = data.get(key)
+                if key not in data and cvar.migration_default is not None:
+                    cvar.value = cvar.migration_default
+                else:
+                    cvar.value = parse_cvar_value(cvar, val_in_file)
+                if cvar.value is not None and not cvar.validate(str(cvar.value)):
+                    # Instead of raising an exception, simply skip over this variable and wait till the user is prompted
+                    logging.getLogger().error("Invalid value %s for config variable %s" % (val_in_file, cvar.key))
+                    cvar.value = None
+
+            if conf_version < template_version:
+                # delete old config file
+                if isfile(yml_path):
+                    unlink(yml_path)
+                # copy the new file template
+                shutil.copy(template_file_path, yml_path)
+                # save the old variables into the new config file
+                safe_ensure_future(save_to_yml(yml_path, cm))
         except Exception as e:
             logging.getLogger().error("Error loading configs. Your config file may be corrupt. %s" % (e,),
                                       exc_info=True)
 
-    load_yml_into_cm(GLOBAL_CONFIG_PATH, global_config_map)
-    load_yml_into_cm(LIQUIDITY_BOUNTY_CONFIG_PATH, liquidity_bounty_config_map)
+    load_yml_into_cm(GLOBAL_CONFIG_PATH, join(TEMPLATE_PATH, "conf_global_TEMPLATE.yml"), global_config_map)
+    load_yml_into_cm(TRADE_FEES_CONFIG_PATH, join(TEMPLATE_PATH, "conf_fee_overrides_TEMPLATE.yml"),
+                     fee_overrides_config_map)
+
     if strategy_file_path:
-        load_yml_into_cm(join(CONF_FILE_PATH, strategy_file_path), strategy_config_map)
+        strategy_template_path = get_strategy_template_path(current_strategy)
+        load_yml_into_cm(join(CONF_FILE_PATH, strategy_file_path), strategy_template_path, strategy_config_map)
 
 
 async def save_to_yml(yml_path: str, cm: Dict[str, ConfigVar]):
@@ -223,7 +283,17 @@ async def save_to_yml(yml_path: str, cm: Dict[str, ConfigVar]):
             data = yaml_parser.load(stream) or {}
             for key in cm:
                 cvar = cm.get(key)
-                data[key] = cvar.value
+                if cvar.is_secure:
+                    if cvar.value is not None and not encrypted_config_file_exists(cvar):
+                        from hummingbot.client.config.in_memory_config_map import in_memory_config_map
+                        password = in_memory_config_map.get("password").value
+                        encrypt_n_save_config_value(cvar, password)
+                    if key in data:
+                        data.pop(key)
+                elif type(cvar.value) == Decimal:
+                    data[key] = float(cvar.value)
+                else:
+                    data[key] = cvar.value
             with open(yml_path, "w+") as outfile:
                 yaml_parser.dump(data, outfile)
     except Exception as e:
@@ -257,15 +327,40 @@ async def create_yml_files():
             conf_path = join(CONF_FILE_PATH, stripped_fname)
             if not isfile(conf_path):
                 shutil.copy(template_path, conf_path)
-            with open(template_path, "r") as template_fd:
-                template_data = yaml_parser.load(template_fd)
-                template_version = template_data.get("template_version", 0)
-            with open(conf_path, "r") as conf_fd:
-                conf_version = 0
-                try:
-                    conf_data = yaml_parser.load(conf_fd)
-                    conf_version = conf_data.get("template_version", 0)
-                except Exception:
-                    pass
-            if conf_version < template_version:
-                shutil.copy(template_path, conf_path)
+
+            # Only overwrite log config. Updating `conf_global.yml` is handled by `read_configs_from_yml`
+            if conf_path.endswith("hummingbot_logs.yml"):
+                with open(template_path, "r") as template_fd:
+                    template_data = yaml_parser.load(template_fd)
+                    template_version = template_data.get("template_version", 0)
+                with open(conf_path, "r") as conf_fd:
+                    conf_version = 0
+                    try:
+                        conf_data = yaml_parser.load(conf_fd)
+                        conf_version = conf_data.get("template_version", 0)
+                    except Exception:
+                        pass
+                if conf_version < template_version:
+                    shutil.copy(template_path, conf_path)
+
+
+def default_min_quote(quote_asset):
+    global_quote_amount = []
+    if global_config_map["min_quote_order_amount"].value is not None:
+        global_quote_amount = [[b, m] for b, m in global_config_map["min_quote_order_amount"].value if b == quote_asset]
+    default_quote_asset, default_amount = "USD", 11
+    if len(global_quote_amount) > 0:
+        default_quote_asset, default_amount = global_quote_amount[0]
+    return default_quote_asset, default_amount
+
+
+def minimum_order_amount(trading_pair):
+    base_asset, quote_asset = trading_pair.split("-")
+    default_quote_asset, default_amount = default_min_quote(quote_asset)
+    try:
+        quote_amount = ExchangeRateConversion.get_instance().convert_token_value_decimal(default_amount,
+                                                                                         default_quote_asset,
+                                                                                         base_asset)
+    except Exception:
+        quote_amount = Decimal('0')
+    return round(quote_amount, 4)
