@@ -21,11 +21,11 @@ from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTr
 from hummingbot.market.switcheo.switcheo_api_order_book_data_source import SwitcheoAPIOrderBookDataSource
 from hummingbot.core.data_type.order_book_message import (
     OrderBookMessageType,
-    SwitcheoOrderBookMessage,
     OrderBookMessage,
 )
-from hummingbot.core.data_type.order_book_tracker_entry import SwitcheoOrderBookTrackerEntry
 from hummingbot.core.utils.async_utils import safe_ensure_future
+from hummingbot.market.switcheo.switcheo_order_book_message import SwitcheoOrderBookMessage
+from hummingbot.market.switcheo.switcheo_order_book_tracker_entry import SwitcheoOrderBookTrackerEntry
 from hummingbot.market.switcheo.switcheo_order_book import SwitcheoOrderBook
 from hummingbot.market.switcheo.switcheo_active_order_tracker import SwitcheoActiveOrderTracker
 

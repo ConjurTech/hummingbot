@@ -13,10 +13,10 @@ from sqlalchemy.engine import RowProxy
 from hummingbot.logger import HummingbotLogger
 from hummingbot.core.data_type.order_book cimport OrderBook
 from hummingbot.core.data_type.order_book_message import (
-    SwitcheoOrderBookMessage,
     OrderBookMessage,
     OrderBookMessageType
 )
+from hummingbot.market.switcheo.switcheo_order_book_message import SwitcheoOrderBookMessage
 
 _rrob_logger = None
 

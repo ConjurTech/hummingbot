@@ -20,8 +20,9 @@ from hummingbot.market.switcheo.switcheo_socketio_namespace import OrderBooksNam
 from hummingbot.core.utils import async_ttl_cache
 from hummingbot.logger import HummingbotLogger
 from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
-from hummingbot.core.data_type.order_book_tracker_entry import OrderBookTrackerEntry, SwitcheoOrderBookTrackerEntry
-from hummingbot.core.data_type.order_book_message import SwitcheoOrderBookMessage
+from hummingbot.core.data_type.order_book_tracker_entry import OrderBookTrackerEntry
+from hummingbot.market.switcheo.switcheo_order_book_message import SwitcheoOrderBookMessage
+from hummingbot.market.switcheo.switcheo_order_book_tracker_entry import SwitcheoOrderBookTrackerEntry
 
 TRADING_PAIR_FILTER = re.compile(r"(ETH|DAI|USDT|WBTC)$")
 

@@ -57,7 +57,7 @@ from hummingbot.market.switcheo.switcheo_order_book_tracker import SwitcheoOrder
 from hummingbot.market.trading_rule cimport TradingRule
 from hummingbot.wallet.ethereum.web3_wallet import Web3Wallet
 
-rrm_logger = None
+sm_logger = None
 s_decimal_0 = Decimal(0)
 
 cdef class SwitcheoMarketTransactionTracker(TransactionTracker):
@@ -984,14 +984,8 @@ cdef class SwitcheoMarket(MarketBase):
     def get_balance(self, currency: str) -> float:
         return self.c_get_balance(currency)
 
-    def get_price(self, symbol: str, is_buy: bool) -> float:
+    def get_price(self, symbol: str, is_buy: bool) -> object:
         return self.c_get_price(symbol, is_buy)
-
-    cdef double c_get_balance(self, str currency) except? -1:
-        return float(self._account_balances.get(currency, 0.0))
-
-    cdef double c_get_available_balance(self, str currency) except? -1:
-        return float(self._account_available_balances.get(currency, 0.0))
 
     cdef OrderBook c_get_order_book(self, str symbol):
         cdef:
@@ -1001,11 +995,18 @@ cdef class SwitcheoMarket(MarketBase):
             raise ValueError(f"No order book exists for '{symbol}'.")
         return order_books[symbol]
 
-    cdef double c_get_price(self, str symbol, bint is_buy) except? -1:
+    cdef object c_get_price(self, str symbol, bint is_buy):
         cdef:
             OrderBook order_book = self.c_get_order_book(symbol)
 
         return order_book.c_get_price(is_buy)
+        try:
+            top_price = Decimal(order_book.c_get_price(is_buy))
+        except EnvironmentError as e:
+            self.logger().warning(f"{'Ask' if is_buy else 'Buy'} orderbook for {trading_pair} is empty.")
+            return s_decimal_NaN
+
+        return self.c_quantize_order_price(trading_pair, top_price)
 
     async def start_network(self):
         if self._order_tracker_task is not None:

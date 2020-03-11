@@ -9,7 +9,7 @@ from typing import Dict
 from hummingbot.logger import HummingbotLogger
 from hummingbot.core.data_type.order_book_row import OrderBookRow
 
-_rraot_logger = None
+_saot_logger = None
 s_empty_diff = np.ndarray(shape=(0, 4), dtype="float64")
 
 SwitcheoOrderBookTrackingDictionary = Dict[Decimal, Dict[str, Dict[str, any]]]
@@ -25,23 +25,27 @@ cdef class SwitcheoActiveOrderTracker:
 
     @classmethod
     def logger(cls) -> HummingbotLogger:
-        global _rraot_logger
-        if _rraot_logger is None:
-            _rraot_logger = logging.getLogger(__name__)
-        return _rraot_logger
+        global _saot_logger
+        if _saot_logger is None:
+            _saot_logger = logging.getLogger(__name__)
+        return _saot_logger
 
     @property
     def active_asks(self) -> SwitcheoOrderBookTrackingDictionary:
+        SwitcheoActiveOrderTracker.logger().info("SwitcheoActiveOrderTracker.active_asks")
         return self._active_asks
 
     @property
     def active_bids(self) -> SwitcheoOrderBookTrackingDictionary:
+        SwitcheoActiveOrderTracker.logger().info("SwitcheoActiveOrderTracker.active_bids")
         return self._active_bids
 
     def volume_for_ask_price(self, price) -> float:
+        SwitcheoActiveOrderTracker.logger().info("SwitcheoActiveOrderTracker.volume_for_ask_price")
         return sum([float(msg["amount"]) for msg in self._active_asks[price].values()])
 
     def volume_for_bid_price(self, price) -> float:
+        SwitcheoActiveOrderTracker.logger().info("SwitcheoActiveOrderTracker.volume_for_bid_price")
         return sum([float(msg["amount"]) for msg in self._active_bids[price].values()])
 
     cdef tuple c_convert_diff_message_to_np_arrays(self, object message):
@@ -52,6 +56,7 @@ cdef class SwitcheoActiveOrderTracker:
             object price
             str amount
 
+        self.logger().info("SwitcheoActiveOrderTracker.c_convert_snapshot_message_to_np_arrays")
         # Refresh all order tracking.
         self._active_bids.clear()
         self._active_asks.clear()
@@ -95,6 +100,7 @@ cdef class SwitcheoActiveOrderTracker:
             double trade_type_value = 1.0 if message.content["event"]["type"] == "ASK" else 2.0
             double filled_base_amount = Decimal(message.content["event"]["filledBaseTokenAmount"])
 
+        SwitcheoActiveOrderTracker.logger().info("SwitcheoActiveOrderTracker.np.ndarray")
         return np.array([message.timestamp, trade_type_value, float(price), float(filled_base_amount)],
                         dtype="float64")
 
@@ -102,6 +108,7 @@ cdef class SwitcheoActiveOrderTracker:
         pass
 
     def convert_snapshot_message_to_order_book_row(self, message):
+        SwitcheoActiveOrderTracker.logger().info("SwitcheoActiveOrderTracker.np.convert_snapshot_message_to_order_book_row")
         np_bids, np_asks = self.c_convert_snapshot_message_to_np_arrays(message)
         bids_row = [OrderBookRow(price, qty, update_id) for ts, price, qty, update_id in np_bids]
         asks_row = [OrderBookRow(price, qty, update_id) for ts, price, qty, update_id in np_asks]

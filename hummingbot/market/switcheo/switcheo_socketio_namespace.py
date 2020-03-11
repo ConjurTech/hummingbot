@@ -6,7 +6,7 @@ import threading
 import time
 from typing import Optional
 
-from hummingbot.core.data_type.order_book_message import SwitcheoOrderBookMessage
+from hummingbot.market.switcheo.switcheo_order_book_message import SwitcheoOrderBookMessage
 from hummingbot.logger import HummingbotLogger
 from hummingbot.market.switcheo.switcheo_order_book import SwitcheoOrderBook
 
