@@ -38,24 +38,25 @@ class SwitcheoAPIOrderBookDataSource(OrderBookTrackerDataSource):
     MESSAGE_TIMEOUT = 30.0
     PING_TIMEOUT = 10.0
 
-    _rraobds_logger: Optional[HummingbotLogger] = None
+    __saobds_logger: Optional[HummingbotLogger] = None
     _client: Optional[aiohttp.ClientSession] = None
 
     @classmethod
     def logger(cls) -> HummingbotLogger:
-        if cls._rraobds_logger is None:
-            cls._rraobds_logger = logging.getLogger(__name__)
-        return cls._rraobds_logger
+        if cls.__saobds_logger is None:
+            cls.__saobds_logger = logging.getLogger(__name__)
+        return cls.__saobds_logger
 
     def __init__(self,
                  socketio_client: SocketIOClient,
-                 symbols: Optional[List[str]] = None):
+                 trading_pairs: Optional[List[str]] = None):
         super().__init__()
-        self._symbols: Optional[List[str]] = symbols
+        self._trading_pairs: Optional[List[str]] = trading_pairs
         self._sio: SocketIOClient = socketio_client
 
     @classmethod
     def http_client(cls) -> aiohttp.ClientSession:
+        SwitcheoAPIOrderBookDataSource.logger().info('SwitcheoAPIOrderBookDataSource.http_client')
         if cls._client is None:
             if not asyncio.get_event_loop().is_running():
                 raise EnvironmentError("Event loop must be running to start HTTP client session.")
@@ -67,6 +68,7 @@ class SwitcheoAPIOrderBookDataSource(OrderBookTrackerDataSource):
         """
         Returns all token information
         """
+        SwitcheoAPIOrderBookDataSource.logger().info('SwitcheoAPIOrderBookDataSource.get_all_token_info')
         client: aiohttp.ClientSession = cls.http_client()
         async with client.get(TOKENS_URL) as response:
             response: aiohttp.ClientResponse = response
@@ -81,6 +83,7 @@ class SwitcheoAPIOrderBookDataSource(OrderBookTrackerDataSource):
         """
         Returned data frame should have symbol as index and include usd volume, baseAsset and quoteAsset
         """
+        SwitcheoAPIOrderBookDataSource.logger().info('SwitcheoAPIOrderBookDataSource.get_active_exchange_markets')
         client: aiohttp.ClientSession = cls.http_client()
         async with client.get(f"{MARKETS_URL}?show_details=1") as response:
             response: aiohttp.ClientResponse = response
@@ -138,6 +141,7 @@ class SwitcheoAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
     @staticmethod
     async def get_snapshot(client: aiohttp.ClientSession, trading_pair: str) -> Dict[str, any]:
+        SwitcheoAPIOrderBookDataSource.logger().info("SwitcheoAPIOrderBookDataSource.get_snapshot")
         async with client.get(f"{REST_BASE_URL}/offers/book?pair={trading_pair}") as response:
             response: aiohttp.ClientResponse = response
             if response.status != 200:
@@ -146,26 +150,28 @@ class SwitcheoAPIOrderBookDataSource(OrderBookTrackerDataSource):
             return await response.json()
 
     async def get_trading_pairs(self) -> List[str]:
-        self.logger().debug(f"Get Trading Pairs: {self._symbols}")
-        if not self._symbols:
+        self.logger().info(f"Get Trading Pairs: {self._trading_pairs}")
+        if not self._trading_pairs:
             try:
                 active_markets: pd.DataFrame = await self.get_active_exchange_markets()
-                self.logger().debug(f"Active Markets: {active_markets}")
-                self._symbols = active_markets.index.tolist()
+                self.logger().info(f"Active Markets: {active_markets}")
+                self._trading_pairs = active_markets.index.tolist()
             except Exception:
-                self._symbols = []
+                self._trading_pairs = []
                 self.logger().network(
                     f"Error getting active exchange information.",
                     exc_info=True,
                     app_warning_msg=f"Error getting active exchange information. Check network connection."
                 )
-        return self._symbols
+        return self._trading_pairs
 
     async def get_tracking_pairs(self, snapshot_msg_stream, diff_msg_stream) -> Dict[str, OrderBookTrackerEntry]:
         # Get the currently active markets and start the SocketIO connection
         trading_pairs: List[str] = await self.get_trading_pairs()
-        self.logger().debug(f"Trading Pairs: {trading_pairs}")
+        self.logger().info(f"Trading Pairs: {trading_pairs}")
         retval: Dict[str, OrderBookTrackerEntry] = {}
+
+        self.logger().info("SwitcheoAPIOrderBookDataSource.get_tracking_pairs")
 
         number_of_pairs: int = len(trading_pairs)
         for index, trading_pair in enumerate(trading_pairs):
@@ -211,15 +217,15 @@ class SwitcheoAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
     async def listen_for_trades(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
         # Trade messages are received from the order book SocketIO web socket
-        self.logger().debug("listen_for_trades:")
+        self.logger().info("listen_for_trades:")
         pass
 
     async def listen_for_order_book_diffs(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
-        self.logger().debug("listen_for_order_book_diffs:")
+        self.logger().info("listen_for_order_book_diffs:")
         # Order Book messages are received from the order book SocketIO web socket
         pass
 
     async def listen_for_order_book_snapshots(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
-        self.logger().debug("listen_for_order_book_snapshots:")
+        self.logger().info("listen_for_order_book_snapshots:")
         # Order Book messages are received from the order book SocketIO web socket
         pass

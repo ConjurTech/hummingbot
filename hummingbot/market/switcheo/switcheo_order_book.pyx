@@ -18,17 +18,17 @@ from hummingbot.core.data_type.order_book_message import (
 )
 from hummingbot.market.switcheo.switcheo_order_book_message import SwitcheoOrderBookMessage
 
-_rrob_logger = None
+_sob_logger = None
 
 
 cdef class SwitcheoOrderBook(OrderBook):
 
     @classmethod
     def logger(cls) -> HummingbotLogger:
-        global _rrob_logger
-        if _rrob_logger is None:
-            _rrob_logger = logging.getLogger(__name__)
-        return _rrob_logger
+        global _sob_logger
+        if _sob_logger is None:
+            _sob_logger = logging.getLogger(__name__)
+        return _sob_logger
 
     @classmethod
     def snapshot_message_from_exchange(cls,

@@ -20,6 +20,8 @@ from hummingbot.client.config.config_helpers import (
 )
 from decimal import Decimal
 
+import logging
+
 
 def maker_trading_pair_prompt():
     maker_market = pure_market_making_config_map.get("maker_market").value
@@ -49,6 +51,7 @@ def is_valid_maker_market_trading_pair(value: str) -> bool:
 
 def order_amount_prompt() -> str:
     trading_pair = pure_market_making_config_map["maker_market_trading_pair"].value
+    logging.getLogger('pmmcm log:').info(f"Log: {str(trading_pair)}. Starting normally...")
     base_asset, quote_asset = trading_pair.split("-")
     min_amount = minimum_order_amount(trading_pair)
     return f"What is the amount of {base_asset} per order? (minimum {min_amount}) >>> "

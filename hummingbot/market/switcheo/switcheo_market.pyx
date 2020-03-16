@@ -113,11 +113,11 @@ cdef class SwitcheoMarket(MarketBase):
                  poll_interval: float = 5.0,
                  order_book_tracker_data_source_type: OrderBookTrackerDataSourceType =
                  OrderBookTrackerDataSourceType.EXCHANGE_API,
-                 symbols: Optional[List[str]] = None,
+                 trading_pairs: Optional[List[str]] = None,
                  trading_required: bool = True):
         super().__init__()
         self._order_book_tracker = SwitcheoOrderBookTracker(data_source_type=order_book_tracker_data_source_type,
-                                                            symbols=symbols)
+                                                            trading_pairs=trading_pairs)
         self._trading_required = trading_required
         self._account_balances = {}
         self._account_available_balances = {}
@@ -234,9 +234,11 @@ cdef class SwitcheoMarket(MarketBase):
         })
 
     async def get_active_exchange_markets(self):
+        self.logger().info('SwitcheoMarket.get_active_exchange_markets')
         return await SwitcheoAPIOrderBookDataSource.get_active_exchange_markets()
 
     async def _status_polling_loop(self):
+        self.logger().info('SwitcheoMarket._status_polling_loop')
         while True:
             try:
                 self._poll_notifier = asyncio.Event()
@@ -258,6 +260,7 @@ cdef class SwitcheoMarket(MarketBase):
                 )
 
     async def _update_balances(self):
+        self.logger().info('SwitcheoMarket._update_balances')
         cdef:
             double current_timestamp = self._current_timestamp
 
@@ -286,6 +289,7 @@ cdef class SwitcheoMarket(MarketBase):
         """
         cdef:
             double current_timestamp = self._current_timestamp
+        self.logger().info('SwitcheoMarket._update_asset_info')
 
         if current_timestamp - self._last_update_asset_info_timestamp > self.UPDATE_HOURLY_INTERVAL or len(self._assets_info) == 0:
             currencies = await self.get_currencies()
@@ -299,6 +303,7 @@ cdef class SwitcheoMarket(MarketBase):
         cdef:
             double current_timestamp = self._current_timestamp
 
+        self.logger().info('SwitcheoMarket._update_contract_address')
         if current_timestamp - self._last_update_contract_address_timestamp > self.UPDATE_HOURLY_INTERVAL or self._contract_address is None:
             contract_address = await self.get_switcheo_contract_address()
             self._contract_address = contract_address
@@ -311,6 +316,7 @@ cdef class SwitcheoMarket(MarketBase):
         if not (current_timestamp - self._last_update_order_timestamp > self.UPDATE_ORDER_TRACKING_INTERVAL and len(self._in_flight_orders) > 0):
             return
 
+        self.logger().info('SwitcheoMarket._update_order_status')
         tracked_orders = list(self._in_flight_orders.values())
         tasks = [self.get_order(o.exchange_order_id)
                  for o in tracked_orders
@@ -417,6 +423,7 @@ cdef class SwitcheoMarket(MarketBase):
         client = await self._http_client()
         default_headers = {"API-Key": self._switcheo_api_key, "User-Agent": "hummingbot"}
         headers_with_ua = {**headers, **default_headers} if headers else default_headers
+        self.logger().info('SwitcheoMarket._api_request')
         async with client.request(http_method,
                                   url=url,
                                   timeout=self.API_CALL_TIMEOUT,
@@ -443,6 +450,7 @@ cdef class SwitcheoMarket(MarketBase):
         incrementing nonce value. These api requests need to executed in order hence we use
         the async scheduler class to queue these tasks.
         """
+        self.logger().info('SwitcheoMarket._sequential_api_request')
         async with timeout(self.TRADE_API_CALL_TIMEOUT):
             coro = self._api_request(
                 http_method,
@@ -635,6 +643,7 @@ cdef class SwitcheoMarket(MarketBase):
     async def cancel_order(self, client_order_id: str) -> Dict[str, Any]:
         order = self.in_flight_orders.get(client_order_id)
         created_timestamp = await order.get_created_timestamp()
+        self.logger().info('SwitcheoMarket.cancel_order')
         if time.time() - created_timestamp < self.MINIMUM_LIMIT_ORDER_LIFESPAN:
             await asyncio.sleep(self.MINIMUM_LIMIT_ORDER_LIFESPAN - (time.time() - created_timestamp))
         if not order:
@@ -655,36 +664,43 @@ cdef class SwitcheoMarket(MarketBase):
         return response_data
 
     async def post_market_order(self, market_order_request: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        self.logger().info('SwitcheoMarket.post_market_order')
         url = f"{self.SWITCHEO_REST_ENDPOINT}/trade"
         response_data = await self._sequential_api_request("post", url=url, json=market_order_request)
         return response_data
 
     async def post_cancel_order(self, cancel_order_request: Dict[str, Any]) -> Dict[str, Any]:
+        self.logger().info('SwitcheoMarket.post_cancel_order')
         url = f"{self.SWITCHEO_REST_ENDPOINT}/cancel"
         response_data = await self._sequential_api_request("post", url=url, data=cancel_order_request)
         return response_data
 
     async def post_limit_order(self, limit_order_request: Dict[str, Any]) -> Dict[str, Any]:
+        self.logger().info('SwitcheoMarket.post_limit_order')
         url = f"{self.SWITCHEO_REST_ENDPOINT}/order"
         response_data = await self._sequential_api_request("post", url=url, data=limit_order_request)
         return response_data
 
     async def get_switcheo_contract_address(self) -> str:
+        self.logger().info('SwitcheoMarket.get_switcheo_contract_address')
         url = f"{self.SWITCHEO_REST_ENDPOINT}/returnContractAddress"
         response_data = await self._api_request("get", url=url)
         return response_data["address"]
 
     async def get_order(self, order_hash: str) -> Dict[str, Any]:
+        self.logger().info('SwitcheoMarket.get_order')
         url = f"{self.SWITCHEO_REST_ENDPOINT}/returnOrderStatus"
         response_data = await self._api_request("get", url=url, params={"orderHash": order_hash})
         return response_data
 
     async def get_currencies(self) -> Dict[str, Dict[str, Any]]:
+        self.logger().info('SwitcheoMarket.get_currencies')
         url = f"{self.SWITCHEO_REST_ENDPOINT}/returnCurrencies"
         response_data = await self._api_request("get", url=url)
         return response_data
 
     async def get_switcheo_balances(self) -> Tuple[Dict[str, float], Dict[str, float]]:
+        self.logger().info('SwitcheoMarket.get_switcheo_balances')
         url = f"{self.SWITCHEO_REST_ENDPOINT}/returnCompleteBalances"
         response_data = await self._api_request("get", url=url, params={"address": self._wallet.address})
         available_balances = {}
@@ -704,6 +720,7 @@ cdef class SwitcheoMarket(MarketBase):
             int64_t tracking_nonce = <int64_t>(time.time() * 1e6)
             str order_id = str(f"buy-{symbol}-{tracking_nonce}")
 
+        self.logger().info('SwitcheoMarket.c_buy')
         safe_ensure_future(self.execute_buy(order_id, symbol, amount, order_type, price))
         return order_id
 
@@ -719,6 +736,7 @@ cdef class SwitcheoMarket(MarketBase):
                               if order_type is OrderType.LIMIT
                               else s_decimal_0)
 
+        self.logger().info('SwitcheoMarket.execute_buy')
         try:
             self.c_start_tracking_order(order_id, symbol, TradeType.BUY, order_type, q_amt, q_price)
             if order_type is OrderType.LIMIT:
@@ -822,6 +840,7 @@ cdef class SwitcheoMarket(MarketBase):
             int64_t tracking_nonce = <int64_t>(time.time() * 1e6)
             str order_id = str(f"sell-{symbol}-{tracking_nonce}")
 
+        self.logger().info('SwitcheoMarket.c_sell')
         safe_ensure_future(self.execute_sell(order_id, symbol, amount, order_type, price))
         return order_id
 
@@ -836,6 +855,7 @@ cdef class SwitcheoMarket(MarketBase):
             object q_price = (self.c_quantize_order_price(symbol, price)
                               if order_type is OrderType.LIMIT
                               else s_decimal_0)
+        self.logger().info('SwitcheoMarket.execute_sell')
         try:
             self.c_start_tracking_order(order_id, symbol, TradeType.SELL, order_type, q_amt, q_price)
             if order_type is OrderType.LIMIT:
@@ -930,6 +950,7 @@ cdef class SwitcheoMarket(MarketBase):
                                                          order_type)
                                  )
     cdef c_cancel(self, str symbol, str client_order_id):
+        self.logger().info('SwitcheoMarket.c_cancel')
         # If there's an ongoing cancel on this order within the expiry time, don't do it again.
         if self._in_flight_cancels.get(client_order_id, 0) > self._current_timestamp - self.CANCEL_EXPIRY_TIME:
             return
@@ -958,6 +979,7 @@ cdef class SwitcheoMarket(MarketBase):
         order_id_set = set(client_order_ids)
         tasks = [self.cancel_order(i) for i in client_order_ids]
         successful_cancellations = []
+        self.logger().info('SwitcheoMarket.cancel_all')
 
         try:
             async with timeout(timeout_seconds):
@@ -979,15 +1001,19 @@ cdef class SwitcheoMarket(MarketBase):
         return successful_cancellations + failed_cancellations
 
     def get_all_balances(self) -> Dict[str, float]:
+        self.logger().info('SwitcheoMarket.get_all_balances')
         return self._account_balances.copy()
 
     def get_balance(self, currency: str) -> float:
+        self.logger().info('SwitcheoMarket.get_balance')
         return self.c_get_balance(currency)
 
     def get_price(self, symbol: str, is_buy: bool) -> object:
+        self.logger().info('SwitcheoMarket.get_price')
         return self.c_get_price(symbol, is_buy)
 
     cdef OrderBook c_get_order_book(self, str symbol):
+        self.logger().info('SwitcheoMarket.c_get_order_book')
         cdef:
             dict order_books = self._order_book_tracker.order_books
 
@@ -996,6 +1022,7 @@ cdef class SwitcheoMarket(MarketBase):
         return order_books[symbol]
 
     cdef object c_get_price(self, str symbol, bint is_buy):
+        self.logger().info('SwitcheoMarket.c_get_price')
         cdef:
             OrderBook order_book = self.c_get_order_book(symbol)
 
@@ -1009,24 +1036,28 @@ cdef class SwitcheoMarket(MarketBase):
         return self.c_quantize_order_price(trading_pair, top_price)
 
     async def start_network(self):
+        self.logger().info('SwitcheoMarket.start_network')
         if self._order_tracker_task is not None:
             self._stop_network()
         self._order_tracker_task = safe_ensure_future(self._order_book_tracker.start())
         self._status_polling_task = safe_ensure_future(self._status_polling_loop())
 
     def _stop_network(self):
+        self.logger().info('SwitcheoMarket._stop_network')
         if self._order_tracker_task is not None:
             self._order_tracker_task.cancel()
             self._status_polling_task.cancel()
         self._order_tracker_task = self._status_polling_task = None
 
     async def stop_network(self):
+        self.logger().info('SwitcheoMarket.stop_network')
         self._stop_network()
         if self._shared_client is not None:
             await self._shared_client.close()
             self._shared_client = None
 
     async def check_network(self) -> NetworkStatus:
+        self.logger().info('SwitcheoMarket.check_network')
         if self._wallet.network_status is not NetworkStatus.CONNECTED:
             return NetworkStatus.NOT_CONNECTED
 
@@ -1040,6 +1071,7 @@ cdef class SwitcheoMarket(MarketBase):
         return NetworkStatus.CONNECTED
 
     cdef c_tick(self, double timestamp):
+        self.logger().info('SwitcheoMarket.c_tick')
         cdef:
             int64_t last_tick = <int64_t>(self._last_timestamp / self._poll_interval)
             int64_t current_tick = <int64_t>(timestamp / self._poll_interval)
@@ -1052,43 +1084,48 @@ cdef class SwitcheoMarket(MarketBase):
         self.c_check_and_remove_expired_orders()
         self._last_timestamp = timestamp
 
-    # cdef c_start_tracking_order(self,
-    #                             str client_order_id,
-    #                             str symbol,
-    #                             object trade_type,
-    #                             object order_type,
-    #                             object amount,
-    #                             object price):
-    #     self._in_flight_orders[client_order_id] = SwitcheoInFlightOrder(
-    #         client_order_id=client_order_id,
-    #         exchange_order_id=None,
-    #         symbol=symbol,
-    #         order_type=order_type,
-    #         trade_type=trade_type,
-    #         price=price,
-    #         amount=amount
-    #     )
+    cdef c_start_tracking_order(self,
+                                str client_order_id,
+                                str symbol,
+                                object trade_type,
+                                object order_type,
+                                object amount,
+                                object price):
+        self.logger().info('SwitcheoMarket.c_start_tracking_order')
+        self._in_flight_orders[client_order_id] = SwitcheoInFlightOrder(
+            client_order_id=client_order_id,
+            exchange_order_id=None,
+            symbol=symbol,
+            order_type=order_type,
+            trade_type=trade_type,
+            price=price,
+            amount=amount
+        )
 
-    # cdef c_expire_order(self, str order_id):
-    #     if order_id not in self._order_expiry_set:
-    #         self._order_expiry_queue.append((self._current_timestamp + self.ORDER_EXPIRY_TIME, order_id))
-    #         self._order_expiry_set.add(order_id)
+    cdef c_expire_order(self, str order_id):
+        self.logger().info('SwitcheoMarket.c_expire_order')
+        if order_id not in self._order_expiry_set:
+            self._order_expiry_queue.append((self._current_timestamp + self.ORDER_EXPIRY_TIME, order_id))
+            self._order_expiry_set.add(order_id)
 
-    # cdef c_check_and_remove_expired_orders(self):
-    #     cdef:
-    #         double current_timestamp = self._current_timestamp
-    #         str order_id
+    cdef c_check_and_remove_expired_orders(self):
+        self.logger().info('SwitcheoMarket.c_check_and_remove_expired_orders')
+        cdef:
+            double current_timestamp = self._current_timestamp
+            str order_id
 
-    #     while len(self._order_expiry_queue) > 0 and self._order_expiry_queue[0][0] < current_timestamp:
-    #         _, order_id = self._order_expiry_queue.popleft()
-    #         self._order_expiry_set.remove(order_id)
-    #         self.c_stop_tracking_order(order_id)
+        while len(self._order_expiry_queue) > 0 and self._order_expiry_queue[0][0] < current_timestamp:
+            _, order_id = self._order_expiry_queue.popleft()
+            self._order_expiry_set.remove(order_id)
+            self.c_stop_tracking_order(order_id)
 
-    # cdef c_stop_tracking_order(self, str order_id):
-    #     if order_id in self._in_flight_orders:
-    #         del self._in_flight_orders[order_id]
+    cdef c_stop_tracking_order(self, str order_id):
+        self.logger().info('SwitcheoMarket.c_stop_tracking_order')
+        if order_id in self._in_flight_orders:
+            del self._in_flight_orders[order_id]
 
     cdef object c_get_order_price_quantum(self, str symbol, object price):
+        self.logger().info('SwitcheoMarket.c_get_order_price_quantum')
         cdef:
             quote_asset = symbol.split("_")[0]
             quote_asset_decimals = self._assets_info[quote_asset]["decimals"]
@@ -1096,6 +1133,7 @@ cdef class SwitcheoMarket(MarketBase):
         return decimals_quantum
 
     cdef object c_get_order_size_quantum(self, str symbol, object amount):
+        self.logger().info('SwitcheoMarket.c_get_order_size_quantum')
         cdef:
             base_asset = symbol.split("_")[1]
             base_asset_decimals = self._assets_info[base_asset]["decimals"]
@@ -1103,11 +1141,13 @@ cdef class SwitcheoMarket(MarketBase):
         return decimals_quantum
 
     def quantize_order_amount(self, symbol: str, amount: Decimal, price: Decimal = s_decimal_0) -> Decimal:
+        self.logger().info('SwitcheoMarket.quantize_order_amount')
         return self.c_quantize_order_amount(symbol, amount, price)
 
     cdef object c_quantize_order_amount(self, str symbol, object amount, object price = s_decimal_0):
         quantized_amount = MarketBase.c_quantize_order_amount(self, symbol, amount)
         base_asset, quote_asset = self.split_symbol(symbol)
+        self.logger().info('SwitcheoMarket.c_quantize_order_amount')
 
         # Check against MINIMUM_MAKER_ORDER_SIZE_ETH return 0 if less than minimum.
         if base_asset == "ETH" and float(quantized_amount) < Decimal(self.MINIMUM_MAKER_ORDER_SIZE_ETH):

@@ -61,7 +61,7 @@ EXAMPLE_PAIRS = {
     "huobi": "ETH-USDT",
     "liquid": "ETH-USD",
     "radar_relay": "ZRX-WETH",
-    "switcheo": "ETH_DAI",
+    "switcheo": "ETH-DAI",
 }
 
 EXAMPLE_ASSETS = {

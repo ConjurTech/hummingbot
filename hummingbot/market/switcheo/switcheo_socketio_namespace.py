@@ -13,13 +13,13 @@ from hummingbot.market.switcheo.switcheo_order_book import SwitcheoOrderBook
 
 class OrderBooksNamespace(SocketIOClientNamespace):
 
-    _rraobds_logger: Optional[HummingbotLogger] = None
+    _sobn_logger: Optional[HummingbotLogger] = None
 
     @classmethod
     def logger(cls) -> HummingbotLogger:
-        if cls._rraobds_logger is None:
-            cls._rraobds_logger = logging.getLogger(__name__)
-        return cls._rraobds_logger
+        if cls._sobn_logger is None:
+            cls._sobn_logger = logging.getLogger(__name__)
+        return cls._sobn_logger
 
     def __init__(self, order_book_snapshot_stream, order_book_diff_stream):
         self.lock = threading.Lock()
@@ -30,6 +30,7 @@ class OrderBooksNamespace(SocketIOClientNamespace):
         SocketIOClientNamespace.__init__(self, namespace=self.namespace)
 
     def on_all(self, data):
+        self.logger().info("SwitcheoOrderBooksNamespace.on_all")
         symbol = data["room"]["pair"]
         self.lock.acquire()
         self.order_book[symbol] = data
@@ -50,6 +51,7 @@ class OrderBooksNamespace(SocketIOClientNamespace):
             self.order_book_snapshot_stream.put_nowait(snapshot_msg)
 
     def on_updates(self, data):
+        self.logger().info("SwitcheoOrderBooksNamespace.on_updates")
         update_digest = data["digest"]
         update_pair = data["room"]["pair"]
         update_events = data["events"]
