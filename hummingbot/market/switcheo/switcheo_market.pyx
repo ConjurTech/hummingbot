@@ -146,12 +146,12 @@ cdef class SwitcheoMarket(MarketBase):
         self._last_nonce = 0
 
     @staticmethod
-    def split_symbol(symbol: str) -> Tuple[str, str]:
+    def split_symbol(trading_pair: str) -> Tuple[str, str]:
         try:
-            quote_asset, base_asset = symbol.split('_')
+            quote_asset, base_asset = trading_pair.split('_')
             return base_asset, quote_asset
         except Exception:
-            raise ValueError(f"Error parsing symbol {symbol}")
+            raise ValueError(f"Error parsing trading_pair {trading_pair}")
 
     @property
     def status_dict(self):
@@ -351,7 +351,7 @@ cdef class SwitcheoMarket(MarketBase):
                     OrderFilledEvent(
                         self._current_timestamp,
                         tracked_limit_order.client_order_id,
-                        tracked_limit_order.symbol,
+                        tracked_limit_order.trading_pair,
                         tracked_limit_order.trade_type,
                         OrderType.LIMIT,
                         tracked_limit_order.price,
@@ -484,13 +484,13 @@ cdef class SwitcheoMarket(MarketBase):
         return TradeFee(percent=self.SWITCHEO_TAKER_PERCENT_FEE, flat_fees=[("ETH", transaction_cost_eth)])
 
     # def _generate_limit_order(self,
-    #                           symbol: str,
+    #                           trading_pair: str,
     #                           amount: Decimal,
     #                           price: Decimal,
     #                           side: str) -> Dict[str, Any]:
     #     amount_base = amount
     #     amount_quote = amount_base * price
-    #     quote_asset, base_asset = symbol.split("_")
+    #     quote_asset, base_asset = trading_pair.split("_")
     #     base_asset_info = self._assets_info[base_asset]
     #     quote_asset_info = self._assets_info[quote_asset]
     #     amount_base_with_decimals = int(amount_base * Decimal(f"1e{base_asset_info['decimals']}"))
@@ -556,9 +556,9 @@ cdef class SwitcheoMarket(MarketBase):
     # def _generate_buy_market_order(self,
     #                                amount: Decimal,
     #                                limit_orders_to_fill: List[Dict[str, Any]],
-    #                                symbol: str) -> List[Dict[str, Any]]:
+    #                                trading_pair: str) -> List[Dict[str, Any]]:
     #     market_orders = []
-    #     base_asset, quote_asset = self.split_symbol(symbol)
+    #     base_asset, quote_asset = self.split_symbol(trading_pair)
     #     base_asset_decimals = self._assets_info[base_asset]["decimals"]
     #     desired_amount_base = Decimal(amount) * Decimal(f"1e{base_asset_decimals}")
     #     total_amount_quote = s_decimal_0
@@ -599,9 +599,9 @@ cdef class SwitcheoMarket(MarketBase):
     # def _generate_sell_market_order(self,
     #                                 amount: Decimal,
     #                                 limit_orders_to_fill: List[Dict[str, Any]],
-    #                                 symbol: str) -> List[Dict[str, Any]]:
+    #                                 trading_pair: str) -> List[Dict[str, Any]]:
     #     market_orders = []
-    #     base_asset, quote_asset = self.split_symbol(symbol)
+    #     base_asset, quote_asset = self.split_symbol(trading_pair)
     #     base_asset_decimals = self._assets_info[base_asset]["decimals"]
     #     quote_asset_decimals = self._assets_info[quote_asset]["decimals"]
     #     desired_amount_base = Decimal(amount) * Decimal(f"1e{base_asset_decimals}")
@@ -711,36 +711,36 @@ cdef class SwitcheoMarket(MarketBase):
         return available_balances, total_balances
 
     cdef str c_buy(self,
-                   str symbol,
+                   str trading_pair,
                    object amount,
                    object order_type = OrderType.MARKET,
                    object price = s_decimal_0,
                    dict kwargs = {}):
         cdef:
             int64_t tracking_nonce = <int64_t>(time.time() * 1e6)
-            str order_id = str(f"buy-{symbol}-{tracking_nonce}")
+            str order_id = str(f"buy-{trading_pair}-{tracking_nonce}")
 
         self.logger().info('SwitcheoMarket.c_buy')
-        safe_ensure_future(self.execute_buy(order_id, symbol, amount, order_type, price))
+        safe_ensure_future(self.execute_buy(order_id, trading_pair, amount, order_type, price))
         return order_id
 
     async def execute_buy(self,
                           order_id: str,
-                          symbol: str,
+                          trading_pair: str,
                           amount: Decimal,
                           order_type: OrderType,
                           price: Decimal) -> str:
         cdef:
-            object q_amt = self.c_quantize_order_amount(symbol, amount)
-            object q_price = (self.c_quantize_order_price(symbol, price)
+            object q_amt = self.c_quantize_order_amount(trading_pair, amount)
+            object q_price = (self.c_quantize_order_price(trading_pair, price)
                               if order_type is OrderType.LIMIT
                               else s_decimal_0)
 
         self.logger().info('SwitcheoMarket.execute_buy')
         try:
-            self.c_start_tracking_order(order_id, symbol, TradeType.BUY, order_type, q_amt, q_price)
+            self.c_start_tracking_order(order_id, "", trading_pair, TradeType.BUY, q_price, q_amt, order_type)
             if order_type is OrderType.LIMIT:
-                limit_order = self._generate_limit_order(symbol=symbol,
+                limit_order = self._generate_limit_order(trading_pair=trading_pair,
                                                          amount=q_amt,
                                                          price=q_price,
                                                          side="buy")
@@ -749,30 +749,30 @@ cdef class SwitcheoMarket(MarketBase):
                 if tracked_order is not None:
                     exchange_order_id = order_result["orderHash"]
                     self.logger().info(f"Created limit buy order {exchange_order_id} for "
-                                       f"{q_amt} {symbol}.")
+                                       f"{q_amt} {trading_pair}.")
                     tracked_order.update_exchange_order_id(exchange_order_id)
                     tracked_order.update_created_timestamp(time.time())
                 self.c_trigger_event(self.MARKET_BUY_ORDER_CREATED_EVENT_TAG,
                                      BuyOrderCreatedEvent(
                                          self._current_timestamp,
                                          order_type,
-                                         symbol,
+                                         trading_pair,
                                          float(q_amt),
                                          float(q_price),
                                          order_id
                                      ))
             else:
                 best_limit_orders = (self._order_book_tracker
-                                     ._active_order_trackers[symbol]
+                                     ._active_order_trackers[trading_pair]
                                      .get_best_limit_orders(is_buy=True, amount=q_amt))
-                signed_market_orders = self._generate_buy_market_order(q_amt, best_limit_orders, symbol)
+                signed_market_orders = self._generate_buy_market_order(q_amt, best_limit_orders, trading_pair)
                 completed_orders = await self.post_market_order(signed_market_orders)
-                self.logger().info(f"Created market buy order for {q_amt} {symbol}.")
+                self.logger().info(f"Created market buy order for {q_amt} {trading_pair}.")
                 self.c_trigger_event(self.MARKET_BUY_ORDER_CREATED_EVENT_TAG,
                                      BuyOrderCreatedEvent(
                                          self._current_timestamp,
                                          order_type,
-                                         symbol,
+                                         trading_pair,
                                          float(q_amt),
                                          0.0,
                                          order_id
@@ -789,7 +789,7 @@ cdef class SwitcheoMarket(MarketBase):
                         OrderFilledEvent(
                             self._current_timestamp,
                             tracked_order.client_order_id,
-                            tracked_order.symbol,
+                            tracked_order.trading_pair,
                             TradeType.BUY,
                             OrderType.MARKET,
                             avg_fill_price,
@@ -820,7 +820,7 @@ cdef class SwitcheoMarket(MarketBase):
         except Exception as e:
             self.c_stop_tracking_order(order_id)
             self.logger().network(
-                f"Error submitting buy order to Switcheo for {amount} {symbol}.",
+                f"Error submitting buy order to Switcheo for {amount} {trading_pair}.",
                 exc_info=True,
                 app_warning_msg=f"Failed to submit buy order to Switcheo: {e}"
             )
@@ -831,35 +831,35 @@ cdef class SwitcheoMarket(MarketBase):
                                  )
 
     cdef str c_sell(self,
-                    str symbol,
+                    str trading_pair,
                     object amount,
                     object order_type = OrderType.MARKET,
                     object price = s_decimal_0,
                     dict kwargs = {}):
         cdef:
             int64_t tracking_nonce = <int64_t>(time.time() * 1e6)
-            str order_id = str(f"sell-{symbol}-{tracking_nonce}")
+            str order_id = str(f"sell-{trading_pair}-{tracking_nonce}")
 
         self.logger().info('SwitcheoMarket.c_sell')
-        safe_ensure_future(self.execute_sell(order_id, symbol, amount, order_type, price))
+        safe_ensure_future(self.execute_sell(order_id, trading_pair, amount, order_type, price))
         return order_id
 
     async def execute_sell(self,
                            order_id: str,
-                           symbol: str,
+                           trading_pair: str,
                            amount: Decimal,
                            order_type: OrderType,
                            price: Decimal) -> str:
         cdef:
-            object q_amt = self.c_quantize_order_amount(symbol, amount)
-            object q_price = (self.c_quantize_order_price(symbol, price)
+            object q_amt = self.c_quantize_order_amount(trading_pair, amount)
+            object q_price = (self.c_quantize_order_price(trading_pair, price)
                               if order_type is OrderType.LIMIT
                               else s_decimal_0)
         self.logger().info('SwitcheoMarket.execute_sell')
         try:
-            self.c_start_tracking_order(order_id, symbol, TradeType.SELL, order_type, q_amt, q_price)
+            self.c_start_tracking_order(order_id, "", trading_pair, TradeType.SELL, q_price, q_amt, order_type)
             if order_type is OrderType.LIMIT:
-                limit_order = self._generate_limit_order(symbol=symbol,
+                limit_order = self._generate_limit_order(trading_pair=trading_pair,
                                                          amount=q_amt,
                                                          price=q_price,
                                                          side="sell")
@@ -868,30 +868,30 @@ cdef class SwitcheoMarket(MarketBase):
                 if tracked_order is not None:
                     exchange_order_id = order_result["orderHash"]
                     self.logger().info(f"Created limit sell order {exchange_order_id} for "
-                                       f"{q_amt} {symbol}.")
+                                       f"{q_amt} {trading_pair}.")
                     tracked_order.update_exchange_order_id(exchange_order_id)
                     tracked_order.update_created_timestamp(time.time())
                 self.c_trigger_event(self.MARKET_SELL_ORDER_CREATED_EVENT_TAG,
                                      SellOrderCreatedEvent(
                                          self._current_timestamp,
                                          order_type,
-                                         symbol,
+                                         trading_pair,
                                          float(q_amt),
                                          float(q_price),
                                          order_id
                                      ))
             else:
                 best_limit_orders = (self._order_book_tracker
-                                     ._active_order_trackers[symbol]
+                                     ._active_order_trackers[trading_pair]
                                      .get_best_limit_orders(is_buy=False, amount=q_amt))
-                signed_market_orders = self._generate_sell_market_order(Decimal(q_amt), best_limit_orders, symbol)
+                signed_market_orders = self._generate_sell_market_order(Decimal(q_amt), best_limit_orders, trading_pair)
                 completed_orders = await self.post_market_order(signed_market_orders)
-                self.logger().info(f"Created market sell order for {q_amt} {symbol}.")
+                self.logger().info(f"Created market sell order for {q_amt} {trading_pair}.")
                 self.c_trigger_event(self.MARKET_SELL_ORDER_CREATED_EVENT_TAG,
                                      SellOrderCreatedEvent(
                                          self._current_timestamp,
                                          order_type,
-                                         symbol,
+                                         trading_pair,
                                          float(q_amt),
                                          0.0,
                                          order_id
@@ -908,7 +908,7 @@ cdef class SwitcheoMarket(MarketBase):
                         OrderFilledEvent(
                             self._current_timestamp,
                             tracked_order.client_order_id,
-                            tracked_order.symbol,
+                            tracked_order.trading_pair,
                             TradeType.SELL,
                             OrderType.MARKET,
                             avg_fill_price,
@@ -940,7 +940,7 @@ cdef class SwitcheoMarket(MarketBase):
         except Exception as e:
             self.c_stop_tracking_order(order_id)
             self.logger().network(
-                f"Error submitting sell order to Switcheo for {amount} {symbol}.",
+                f"Error submitting sell order to Switcheo for {amount} {trading_pair}.",
                 exc_info=True,
                 app_warning_msg=f"Failed to submit sell order to Switcheo: {e}"
             )
@@ -949,7 +949,7 @@ cdef class SwitcheoMarket(MarketBase):
                                                          order_id,
                                                          order_type)
                                  )
-    cdef c_cancel(self, str symbol, str client_order_id):
+    cdef c_cancel(self, str trading_pair, str client_order_id):
         self.logger().info('SwitcheoMarket.c_cancel')
         # If there's an ongoing cancel on this order within the expiry time, don't do it again.
         if self._in_flight_cancels.get(client_order_id, 0) > self._current_timestamp - self.CANCEL_EXPIRY_TIME:
@@ -1008,23 +1008,23 @@ cdef class SwitcheoMarket(MarketBase):
         self.logger().info('SwitcheoMarket.get_balance')
         return self.c_get_balance(currency)
 
-    def get_price(self, symbol: str, is_buy: bool) -> object:
+    def get_price(self, trading_pair: str, is_buy: bool) -> object:
         self.logger().info('SwitcheoMarket.get_price')
-        return self.c_get_price(symbol, is_buy)
+        return self.c_get_price(trading_pair, is_buy)
 
-    cdef OrderBook c_get_order_book(self, str symbol):
+    cdef OrderBook c_get_order_book(self, str trading_pair):
         self.logger().info('SwitcheoMarket.c_get_order_book')
         cdef:
             dict order_books = self._order_book_tracker.order_books
 
-        if symbol not in order_books:
-            raise ValueError(f"No order book exists for '{symbol}'.")
-        return order_books[symbol]
+        if trading_pair not in order_books:
+            raise ValueError(f"No order book exists for '{trading_pair}'.")
+        return order_books[trading_pair]
 
-    cdef object c_get_price(self, str symbol, bint is_buy):
+    cdef object c_get_price(self, str trading_pair, bint is_buy):
         self.logger().info('SwitcheoMarket.c_get_price')
         cdef:
-            OrderBook order_book = self.c_get_order_book(symbol)
+            OrderBook order_book = self.c_get_order_book(trading_pair)
 
         return order_book.c_get_price(is_buy)
         try:
@@ -1085,17 +1085,19 @@ cdef class SwitcheoMarket(MarketBase):
         self._last_timestamp = timestamp
 
     cdef c_start_tracking_order(self,
-                                str client_order_id,
-                                str symbol,
+                                str order_id,
+                                str exchange_order_id,
+                                str trading_pair,
                                 object trade_type,
-                                object order_type,
+                                object price,
                                 object amount,
-                                object price):
+                                object order_type):
         self.logger().info('SwitcheoMarket.c_start_tracking_order')
-        self._in_flight_orders[client_order_id] = SwitcheoInFlightOrder(
-            client_order_id=client_order_id,
-            exchange_order_id=None,
-            symbol=symbol,
+
+        self._in_flight_orders[order_id] = SwitcheoInFlightOrder(
+            client_order_id=order_id,
+            exchange_order_id=exchange_order_id,
+            trading_pair=trading_pair,
             order_type=order_type,
             trade_type=trade_type,
             price=price,
@@ -1124,29 +1126,29 @@ cdef class SwitcheoMarket(MarketBase):
         if order_id in self._in_flight_orders:
             del self._in_flight_orders[order_id]
 
-    cdef object c_get_order_price_quantum(self, str symbol, object price):
+    cdef object c_get_order_price_quantum(self, str trading_pair, object price):
         self.logger().info('SwitcheoMarket.c_get_order_price_quantum')
         cdef:
-            quote_asset = symbol.split("_")[0]
+            quote_asset = trading_pair.split("_")[0]
             quote_asset_decimals = self._assets_info[quote_asset]["decimals"]
         decimals_quantum = Decimal(f"1e-{quote_asset_decimals}")
         return decimals_quantum
 
-    cdef object c_get_order_size_quantum(self, str symbol, object amount):
+    cdef object c_get_order_size_quantum(self, str trading_pair, object amount):
         self.logger().info('SwitcheoMarket.c_get_order_size_quantum')
         cdef:
-            base_asset = symbol.split("_")[1]
+            base_asset = trading_pair.split("_")[1]
             base_asset_decimals = self._assets_info[base_asset]["decimals"]
         decimals_quantum = Decimal(f"1e-{base_asset_decimals}")
         return decimals_quantum
 
-    def quantize_order_amount(self, symbol: str, amount: Decimal, price: Decimal = s_decimal_0) -> Decimal:
+    def quantize_order_amount(self, trading_pair: str, amount: Decimal, price: Decimal = s_decimal_0) -> Decimal:
         self.logger().info('SwitcheoMarket.quantize_order_amount')
-        return self.c_quantize_order_amount(symbol, amount, price)
+        return self.c_quantize_order_amount(trading_pair, amount, price)
 
-    cdef object c_quantize_order_amount(self, str symbol, object amount, object price = s_decimal_0):
-        quantized_amount = MarketBase.c_quantize_order_amount(self, symbol, amount)
-        base_asset, quote_asset = self.split_symbol(symbol)
+    cdef object c_quantize_order_amount(self, str trading_pair, object amount, object price = s_decimal_0):
+        quantized_amount = MarketBase.c_quantize_order_amount(self, trading_pair, amount)
+        base_asset, quote_asset = self.split_symbol(trading_pair)
         self.logger().info('SwitcheoMarket.c_quantize_order_amount')
 
         # Check against MINIMUM_MAKER_ORDER_SIZE_ETH return 0 if less than minimum.
@@ -1154,7 +1156,7 @@ cdef class SwitcheoMarket(MarketBase):
             return s_decimal_0
         elif quote_asset == "ETH":
             # Price is not passed in for market orders so price needs to be checked via the order book
-            actual_price = Decimal(price or self.get_price(symbol, True))  # Since order side is unknown use higher price (buy)
+            actual_price = Decimal(price or self.get_price(trading_pair, True))  # Since order side is unknown use higher price (buy)
             amount_quote = quantized_amount * actual_price
             if amount_quote < Decimal(self.MINIMUM_MAKER_ORDER_SIZE_ETH):
                 return s_decimal_0
